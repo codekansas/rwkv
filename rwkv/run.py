@@ -4,7 +4,7 @@ Sample usage:
 
 .. code-block:: bash
 
-    python -m rwkv.run 430m "It was the best of times, it was the"
+    rwkv 430m "It was the best of times, it was the"
 """
 
 import argparse
