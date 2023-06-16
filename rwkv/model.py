@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 
 PretrainedRwkvKey = Literal["169m", "430m", "1.5b", "3b", "7b", "14b"]
 
-AttentionState = tuple[Tensor, Tensor, Tensor]
+AttentionState = tuple[Tensor, Tensor]
 FeedForwardState = Tensor
 State = tuple[AttentionState, FeedForwardState]
 
@@ -115,9 +115,7 @@ TOKENIZER_URL = "https://raw.githubusercontent.com/BlinkDL/ChatRWKV/main/20B_tok
 
 class Attention(nn.Module):
     init_x: Tensor
-    init_alpha_plus: Tensor
-    init_alpha_minus: Tensor
-    init_beta: Tensor
+    init_state: Tensor
 
     def __init__(self, emb_dim: int, max_tsz: int = 1024, lora_rank: int | None = None) -> None:
         super().__init__()
@@ -134,12 +132,12 @@ class Attention(nn.Module):
         self.receptance = maybe_lora(nn.Linear(emb_dim, emb_dim, bias=False), lora_rank)
         self.output = maybe_lora(nn.Linear(emb_dim, emb_dim, bias=False), lora_rank)
 
-        self.register_buffer("init_x", torch.zeros(1, 1, emb_dim), persistent=False)
-        self.register_buffer("init_alpha_plus", torch.full((1, 1, emb_dim), float("-inf")), persistent=False)
-        self.register_buffer("init_alpha_minus", torch.full((1, 1, emb_dim), float("-inf")), persistent=False)
-        self.register_buffer("init_beta", torch.full((1, 1, emb_dim), float("-inf")), persistent=False)
+        wkv_fn, init_state = get_wkv_fn(emb_dim, "log")
 
-        self.wkv_fn = get_wkv_fn()
+        self.register_buffer("init_x", torch.zeros(1, 1, emb_dim), persistent=False)
+        self.register_buffer("init_state", init_state, persistent=False)
+
+        self.wkv_fn = wkv_fn
 
     def time_shift(self, last_x: Tensor, x: Tensor) -> Tensor:
         _, tsz, _ = x.shape
@@ -152,11 +150,9 @@ class Attention(nn.Module):
 
         if state is None:
             last_x = self.init_x.repeat(bsz, 1, 1)
-            log_alpha_p = self.init_alpha_plus.repeat(bsz, 1, 1)
-            log_alpha_m = self.init_alpha_minus.repeat(bsz, 1, 1)
-            log_beta = self.init_beta.repeat(bsz, 1, 1)
+            last_state = self.init_state.repeat(bsz, 1, 1)
         else:
-            last_x, log_alpha_p, log_alpha_m, log_beta = state
+            last_x, last_state = state
         last_x = self.time_shift(last_x, x)
 
         k = self.key(x * self.time_mix_k + last_x * (1 - self.time_mix_k))
@@ -165,10 +161,10 @@ class Attention(nn.Module):
         sr = torch.sigmoid(r)
 
         w, u = self.time_decay, self.time_first
-        wkv, log_alpha_p, log_alpha_m, log_beta = self.wkv_fn(w, u, k, v, log_alpha_p, log_alpha_m, log_beta)
+        wkv, next_state = self.wkv_fn(w, u, k, v, last_state)
         rwkv = wkv * sr
 
-        return self.output(rwkv), (x[..., -1:, :], log_alpha_p, log_alpha_m, log_beta)
+        return self.output(rwkv), (x[..., -1:, :], next_state)
 
 
 class FeedForward(nn.Module):

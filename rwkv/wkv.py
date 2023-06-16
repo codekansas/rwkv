@@ -1,20 +1,27 @@
-"""Implements the WKV part of the RWKV model."""
+"""Implements the WKV part of the RWKV model.
 
-from typing import Callable
+This provides a few different implementations of the WKV algorithm, which
+is used to compute the output of the model.
+"""
+
+import functools
+import logging
+from typing import Callable, Literal
 
 import torch
 from torch import Tensor
 
+logger = logging.getLogger(__name__)
 
-def _wkv_with_eps(
-    w: Tensor,
-    u: Tensor,
-    k: Tensor,
-    v: Tensor,
-    alpha: Tensor,
-    beta: Tensor,
-    eps: Tensor,
-) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+WkvImpl = Literal["vanilla", "eps", "log", "triton"]
+
+
+@functools.lru_cache
+def supports_triton() -> bool:
+    return torch.cuda.is_available()
+
+
+def _wkv_vanilla(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tensor) -> tuple[Tensor, Tensor]:
     """Runs the core WKV computation.
 
     Args:
@@ -22,16 +29,58 @@ def _wkv_with_eps(
         u: The output multiplier tensor, with shape (D)
         k: The K tensor, with shape (B, T, D)
         v: The V tensor, with shape (B, T, D)
-        alpha: The last numerator, with shape (B, 1, D)
-        beta: The last denominator, with shape (B, 1, D)
-        eps: The epsilon tensor, with shape (B, 1, D)
+        state: The state tensor, with shape (B, 2, D), consisting of the
+            alpha and beta tensors, each with shape (B, 1, D)
 
     Returns:
-        The WKV tensor, with shape (B, T, D), and the next alpha, beta and
-        epsilon tensors, each with shape (B, 1, D)
+        The WKV tensor, with shape (B, T, D), and the next state, with shape
+        (B, 2, D), consisting of the next alpha and beta tensors, each with
+        shape (B, 1, D)
     """
     assert w.dim() == u.dim() == 1
-    assert k.dim() == v.dim() == alpha.dim() == beta.dim() == 3
+    assert k.dim() == v.dim() == state.dim()
+
+    alpha, beta = state.chunk(2, dim=1)
+
+    _, tsz, _ = k.shape
+
+    ew = torch.exp(-torch.exp(w))
+
+    wkvs = []
+
+    for t in range(tsz):
+        kt, vt = k[:, t : t + 1], v[:, t : t + 1]
+        euk = torch.exp(u + kt)
+        wkv = (alpha + euk * vt) / (beta + euk)
+        wkvs.append(wkv)
+
+        ek = torch.exp(kt)
+        alpha = ew * alpha + ek * vt
+        beta = ew * beta + ek
+
+    return torch.cat(wkvs, 1), torch.cat((alpha, beta), dim=1)
+
+
+def _wkv_with_eps(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tensor) -> tuple[Tensor, Tensor]:
+    """Runs the core WKV computation.
+
+    Args:
+        w: The decay tensor, with shape (D)
+        u: The output multiplier tensor, with shape (D)
+        k: The K tensor, with shape (B, T, D)
+        v: The V tensor, with shape (B, T, D)
+        state: The last state, with shape (B, 3, D), consisting of the last
+            alpha, beta and epsilon tensors, each with shape (B, 1, D)
+
+    Returns:
+        The WKV tensor, with shape (B, T, D), and the next state, with shape
+        (B, 3, D), consisting of the next alpha, beta and epsilon tensors,
+        each with shape (B, 1, D)
+    """
+    assert w.dim() == u.dim() == 1
+    assert k.dim() == v.dim() == state.dim() == state.dim() == 3
+
+    alpha, beta, eps = state.chunk(3, dim=1)
 
     _, tsz, _ = k.shape
 
@@ -54,17 +103,10 @@ def _wkv_with_eps(
         alpha = e1 * alpha + e2 * vt
         beta = e1 * beta + e2
 
-    return torch.cat(wkvs, 1), alpha, beta, eps
+    return torch.cat(wkvs, 1), torch.cat((alpha, beta, eps), dim=1)
 
 
-def _wkv_vanilla(
-    w: Tensor,
-    u: Tensor,
-    k: Tensor,
-    v: Tensor,
-    alpha: Tensor,
-    beta: Tensor,
-) -> tuple[Tensor, Tensor, Tensor]:
+def _wkv_log_space(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tensor) -> tuple[Tensor, Tensor]:
     """Runs the core WKV computation.
 
     Args:
@@ -72,61 +114,18 @@ def _wkv_vanilla(
         u: The output multiplier tensor, with shape (D)
         k: The K tensor, with shape (B, T, D)
         v: The V tensor, with shape (B, T, D)
-        alpha: The last numerator, with shape (B, 1, D)
-        beta: The last denominator, with shape (B, 1, D)
+        state: The last state, with shape (B, 3, D), consisting of the last
+            alpha, beta and epsilon tensors, each with shape (B, 1, D)
 
     Returns:
-        The WKV tensor, with shape (B, T, D), and the next alpha and beta
-        tensors, each with shape (B, 1, D)
+        The WKV tensor, with shape (B, T, D), and the next state, with shape
+        (B, 3, D), consisting of the next alpha, beta and epsilon tensors,
+        each with shape (B, 1, D)
     """
     assert w.dim() == u.dim() == 1
-    assert k.dim() == v.dim() == alpha.dim() == beta.dim() == 3
+    assert k.dim() == v.dim() == state.dim()
 
-    _, tsz, _ = k.shape
-
-    ew = torch.exp(-torch.exp(w))
-
-    wkvs = []
-
-    for t in range(tsz):
-        kt, vt = k[:, t : t + 1], v[:, t : t + 1]
-        euk = torch.exp(u + kt)
-        wkv = (alpha + euk * vt) / (beta + euk)
-        wkvs.append(wkv)
-
-        ek = torch.exp(kt)
-        alpha = ew * alpha + ek * vt
-        beta = ew * beta + ek
-
-    return torch.cat(wkvs, 1), alpha, beta
-
-
-def _wkv_log_space(
-    w: Tensor,
-    u: Tensor,
-    k: Tensor,
-    v: Tensor,
-    log_alpha_plus: Tensor,
-    log_alpha_minus: Tensor,
-    log_beta: Tensor,
-) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-    """Runs the core WKV computation.
-
-    Args:
-        w: The decay tensor, with shape (D)
-        u: The output multiplier tensor, with shape (D)
-        k: The K tensor, with shape (B, T, D)
-        v: The V tensor, with shape (B, T, D)
-        log_alpha_plus: The last positive numerator part, with shape (B, 1, D)
-        log_alpha_minus: The last negative numerator part, with shape (B, 1, D)
-        log_beta: The last denominator, with shape (B, 1, D)
-
-    Returns:
-        The WKV tensor, with shape (B, T, D), and the next alpha plus, alpha
-        minus and beta tensors, each with shape (B, 1, D)
-    """
-    assert w.dim() == u.dim() == 1
-    assert k.dim() == v.dim() == log_alpha_plus.dim() == log_alpha_minus.dim() == log_beta.dim() == 3
+    log_alpha_plus, log_alpha_minus, log_beta = state.chunk(3, dim=1)
 
     _, tsz, _ = k.shape
 
@@ -150,22 +149,40 @@ def _wkv_log_space(
         log_alpha_minus = torch.logaddexp(w + log_alpha_minus, kt + log_v_minus)
         log_beta = torch.logaddexp(w + log_beta, kt)
 
-    return torch.cat(wkvs, 1), log_alpha_plus, log_alpha_minus, log_beta
+    return torch.cat(wkvs, 1), torch.cat((log_alpha_plus, log_alpha_minus, log_beta), dim=1)
 
 
-def get_wkv_fn() -> Callable:
-    """Returns the WKV function to use.
+def get_wkv_fn(
+    emb_dim: int,
+    impl: WkvImpl = "triton",
+) -> tuple[Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], tuple[Tensor, Tensor]], Tensor]:
+    """Returns the WKV function to use and the hidden state.
 
-    The function takes six tensors as input, and returns three tensors as
-    output. The input tensors are ``w``, ``u``, ``k``, ``v``, ``alpha``, and
-    ``beta``, and the output tensors are ``out``, ``alpha``, and ``beta``.
+    The function takes the
+
+    Args:
+        emb_dim: The embedding dimension.
+        impl: The implementation to use. Can be ``"vanilla"``, ``"log"``,
+            ``"eps"``, or ``"triton"``.
 
     Returns:
         The WKV function to use.
     """
-    if torch.cuda.is_available():
-        from rwkv.triton.wkv_kernel import triton_wkv
+    if impl == "triton":
+        if supports_triton():
+            from rwkv.triton.wkv_kernel import triton_wkv
 
-        return triton_wkv
+            return triton_wkv, torch.full((1, 3, emb_dim), float("-inf"))
 
-    return _wkv_log_space
+        logger.warning("Triton implementation is not available; falling back to log implementation")
+        impl = "log"
+
+    match impl:
+        case "vanilla":
+            return _wkv_vanilla, torch.zeros(1, 3, emb_dim)
+        case "log":
+            return _wkv_log_space, torch.full((1, 3, emb_dim), float("-inf"))
+        case "eps":
+            return _wkv_with_eps, torch.zeros(1, 1, emb_dim)
+        case _:
+            raise ValueError(f"Unknown implementation: {impl}")
