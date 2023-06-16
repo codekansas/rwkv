@@ -142,7 +142,7 @@ def wkv_vanilla(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tensor) -> tu
 
     Returns:
         The WKV tensor, with shape (B, T, D), and the next state, with shape
-        (B, 2, T, D), consisting of the next alpha and beta tensors, each with
-        shape (B, 1, T, D)
+        (B, 2, 1, D), consisting of the next alpha and beta tensors, each with
+        shape (B, 1, 1, D)
     """
     return WkvVanilla.apply(w, u, k, v, state)

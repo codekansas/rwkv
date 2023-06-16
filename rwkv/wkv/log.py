@@ -77,7 +77,7 @@ class WkvLogSpace(Function):
 
 
 def initial_state_log_space(emb_dim: int) -> Tensor:
-    return torch.zeros(1, 3, emb_dim)
+    return torch.full((1, 3, emb_dim), float("-inf"))
 
 
 def wkv_log_space(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tensor) -> tuple[Tensor, Tensor]:

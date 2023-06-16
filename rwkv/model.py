@@ -132,7 +132,7 @@ class Attention(nn.Module):
         self.receptance = maybe_lora(nn.Linear(emb_dim, emb_dim, bias=False), lora_rank)
         self.output = maybe_lora(nn.Linear(emb_dim, emb_dim, bias=False), lora_rank)
 
-        wkv_fn, init_state = get_wkv_fn(emb_dim, "vanilla")
+        wkv_fn, init_state = get_wkv_fn(emb_dim, "eps")
 
         self.register_buffer("init_x", torch.zeros(1, 1, emb_dim), persistent=False)
         self.register_buffer("init_state", init_state, persistent=False)
