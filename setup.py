@@ -16,7 +16,7 @@ version: str = version_re.group(1)
 
 
 setup(
-    name="rwkv",
+    name="rwkv-ml",
     version=version,
     description="ML project template repository",
     author="Benjamin Bolte",
