@@ -117,7 +117,7 @@ class Attention(nn.Module):
     init_x: Tensor
     init_state: Tensor
 
-    def __init__(self, emb_dim: int, max_tsz: int = 1024, lora_rank: int | None = None) -> None:
+    def __init__(self, emb_dim: int, lora_rank: int | None = None) -> None:
         super().__init__()
 
         self.time_decay = nn.Parameter(torch.empty(emb_dim))
@@ -132,7 +132,7 @@ class Attention(nn.Module):
         self.receptance = maybe_lora(nn.Linear(emb_dim, emb_dim, bias=False), lora_rank)
         self.output = maybe_lora(nn.Linear(emb_dim, emb_dim, bias=False), lora_rank)
 
-        wkv_fn, init_state = get_wkv_fn(emb_dim, "log")
+        wkv_fn, init_state = get_wkv_fn(emb_dim, "vanilla")
 
         self.register_buffer("init_x", torch.zeros(1, 1, emb_dim), persistent=False)
         self.register_buffer("init_state", init_state, persistent=False)
@@ -149,8 +149,8 @@ class Attention(nn.Module):
         bsz, _, _ = x.shape
 
         if state is None:
-            last_x = self.init_x.repeat(bsz, 1, 1)
-            last_state = self.init_state.repeat(bsz, 1, 1)
+            last_x = self.init_x.repeat_interleave(bsz, dim=0)
+            last_state = self.init_state.repeat_interleave(bsz, dim=0)
         else:
             last_x, last_state = state
         last_x = self.time_shift(last_x, x)
@@ -161,6 +161,7 @@ class Attention(nn.Module):
         sr = torch.sigmoid(r)
 
         w, u = self.time_decay, self.time_first
+        w = -torch.exp(w)
         wkv, next_state = self.wkv_fn(w, u, k, v, last_state)
         rwkv = wkv * sr
 
@@ -214,9 +215,9 @@ class Block(nn.Module):
     def forward(self, x: Tensor, state: State | None = None) -> tuple[Tensor, State]:
         if self.ln0 is not None:
             x = self.ln0(x)
-        dx, att_state_out = self.att(self.ln1(x), None if state is None else state[0])
+        dx, att_state_out = self.att.forward(self.ln1(x), None if state is None else state[0])
         x = x + dx
-        dx, ffn_state_out = self.ffn(self.ln2(x), None if state is None else state[1])
+        dx, ffn_state_out = self.ffn.forward(self.ln2(x), None if state is None else state[1])
         x = x + dx
         return x, (att_state_out, ffn_state_out)
 
