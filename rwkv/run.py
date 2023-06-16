@@ -1,28 +1,21 @@
 r"""Script for running thr RWKV model ad-hoc.
 
-Usage:
+Sample usage:
 
 .. code-block:: bash
 
-    python -m rwkv.run \
-        <size> \
-        <prompt> \
-        [-t <tsz>] \
-        [-m <temperature>] \
-        [-p <top-p>] \
-        [-e <end-tok>] \
-        [-s <sep>] \
-        [-y]
+    python -m rwkv.run 430m "It was the best of times, it was the"
 """
 
 import argparse
 from typing import get_args
 
 from ml.utils.logging import configure_logging
-from rwkv.model import pretrained_rwkv, PretrainedRwkvKey
+
+from rwkv.model import PretrainedRwkvKey, pretrained_rwkv
 
 
-def run_rwkv() -> None:
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("size", type=str, choices=get_args(PretrainedRwkvKey))
     parser.add_argument("prompt", type=str, nargs="?")
@@ -63,4 +56,4 @@ def run_rwkv() -> None:
 
 if __name__ == "__main__":
     # python -m rwkv.run
-    run_rwkv()
+    main()
