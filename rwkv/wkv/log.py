@@ -10,7 +10,14 @@ from torch import Tensor
 from torch.autograd.function import Function, FunctionCtx, once_differentiable
 
 
-def wkv_log_space_forward(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tensor) -> tuple[Tensor, Tensor]:
+def wkv_log_space_forward(
+    w: Tensor,
+    u: Tensor,
+    k: Tensor,
+    v: Tensor,
+    state: Tensor,
+    eps: float = 1e-5,
+) -> tuple[Tensor, Tensor]:
     assert w.dim() == u.dim() == 1
     assert k.dim() == v.dim() == state.dim()
 
@@ -22,8 +29,8 @@ def wkv_log_space_forward(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Ten
 
     for t in range(tsz):
         kt, vt = k[:, t : t + 1], v[:, t : t + 1]
-        v_plus = torch.clamp(vt, min=0) + 1e-9
-        v_minus = torch.clamp(-vt, min=0) + 1e-9
+        v_plus = torch.clamp(vt, min=0) + eps
+        v_minus = torch.clamp(-vt, min=0) + eps
         log_v_plus = torch.log(v_plus)
         log_v_minus = torch.log(v_minus)
 

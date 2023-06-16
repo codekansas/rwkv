@@ -70,15 +70,15 @@ def test_vanilla_wkv_gradients(mode: str) -> None:
 
     # Uses autograd to compute the gradients.
     wt, ut, kt, vt, statet = _copy_with_grad(w, u, k, v, state)
-    wkv_out_ref, state_out_ref = wkv_vanilla_forward(wt, ut, kt, vt, statet)
+    wkv_ref, state_out_ref = wkv_vanilla_forward(wt, ut, kt, vt, statet)
     state_out_ref = state_out_ref[:, :, -1:]
-    backprop(wkv_out_ref, state_out_ref)
+    backprop(wkv_ref, state_out_ref)
     wgr, ugr, kgr, vgr, stategr = _get_grads(wt, ut, kt, vt, statet)
 
     # Uses the manual gradient computation to compute the gradients.
     wt, ut, kt, vt, statet = _copy_with_grad(w, u, k, v, state)
-    wkv_out_man, state_out_man = wkv_vanilla(wt, ut, kt, vt, statet)
-    backprop(wkv_out_man, state_out_man)
+    wkv_man, state_out_man = wkv_vanilla(wt, ut, kt, vt, statet)
+    backprop(wkv_man, state_out_man)
     wgm, ugm, kgm, vgm, stategm = _get_grads(wt, ut, kt, vt, statet)
 
     for gr, gm in zip((wgr, ugr, kgr, vgr, stategr), (wgm, ugm, kgm, vgm, stategm)):

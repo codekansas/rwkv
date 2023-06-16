@@ -32,9 +32,9 @@ def wkv_with_eps_forward(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tens
         wkv = (e1 * alpha + e2 * vt) / (e1 * beta + e2)
         wkvs.append(wkv)
 
-        ww = eps + w
-        eps = torch.maximum(ww, kt)
-        e1 = torch.exp(ww - eps)
+        w_eps = w + eps
+        eps = torch.maximum(w_eps, kt)
+        e1 = torch.exp(w_eps - eps)
         e2 = torch.exp(kt - eps)
         alpha = e1 * alpha + e2 * vt
         beta = e1 * beta + e2
@@ -59,7 +59,60 @@ def wkv_with_eps_backward(
     grad_wkv: Tensor,
     grad_state: Tensor,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-    raise NotImplementedError
+    bsz, tsz, chans = k.shape
+    assert w.shape == u.shape == (chans,)
+    assert v.shape == (bsz, tsz, chans)
+    assert state.shape == (bsz, 3, tsz + 1, chans)
+    assert grad_wkv.shape == (bsz, tsz, chans)
+    assert grad_state.shape == (bsz, 3, 1, chans)
+
+    alpha, beta, eps = state.chunk(3, dim=1)  # (B, 1, T + 1, D), (B, 1, T + 1, D), (B, 1, T + 1, D)
+    grad_alpha, grad_beta, grad_eps = grad_state[:, :, 0].chunk(3, dim=1)  # (B, 1, D), (B, 1, D), (B, 1, D)
+
+    grad_w = torch.zeros_like(w)
+    grad_u = torch.zeros_like(u)
+    grad_k = torch.zeros_like(k)
+    grad_v = torch.zeros_like(v)
+
+    for t in reversed(range(tsz)):
+        kt, vt = k[:, t : t + 1], v[:, t : t + 1]
+        alpha_prev, beta_prev, eps_prev, eps_curr = alpha[:, :, t], beta[:, :, t], eps[:, :, t], eps[:, :, t + 1]
+        ukt = u + kt
+        tau = torch.maximum(ukt, eps_prev)
+        e1 = torch.exp(eps_prev - tau)
+        e2 = torch.exp(ukt - tau)
+
+        denom = e1 * beta_prev + e2
+        denom_sq = denom**2
+
+        grad_wkvt = grad_wkv[:, t : t + 1]
+
+        # Backpropagates wkv gradients.
+        grad_uk = grad_wkvt * e2 * (e1 * beta_prev * vt - e1 * alpha_prev) / denom_sq
+        grad_u += grad_uk.flatten(0, -2).sum(0)
+        grad_k[:, t : t + 1] += grad_uk
+        grad_v[:, t : t + 1] += grad_wkvt * e2 / denom
+
+        grad_alpha_wkv = grad_wkvt * e1 / denom
+        grad_beta_wkv = -grad_wkvt * (e2 * vt + e1 * alpha_prev) / denom_sq
+
+        e1 = torch.exp(w + eps_prev - eps_curr)
+        e2 = torch.exp(kt - eps_curr)
+
+        # Backpropagates alpha gradients.
+        grad_w += (grad_alpha * e1 * alpha_prev).flatten(0, -2).sum(0)
+        grad_k[:, t : t + 1] += grad_alpha * e2 * vt
+        grad_v[:, t : t + 1] += grad_alpha * e2
+
+        # Backpropagates beta gradients.
+        grad_w += (grad_beta * e1 * beta_prev).flatten(0, -2).sum(0)
+        grad_k[:, t : t + 1] += grad_beta * e2
+
+        # Computes gradients for alpha and beta.
+        grad_alpha = grad_alpha * e1 + grad_alpha_wkv
+        grad_beta = grad_beta * e1 + grad_beta_wkv
+
+    return grad_w, grad_u, grad_k, grad_v, torch.stack((grad_alpha, grad_beta, grad_eps), dim=1)
 
 
 class WkvWithEps(Function):
@@ -72,8 +125,8 @@ class WkvWithEps(Function):
         v: Tensor,
         state: Tensor,
     ) -> tuple[Tensor, Tensor]:
-        ctx.save_for_backward(w, u, k, v, state)
         wkv, state_out = wkv_with_eps_forward(w, u, k, v, state)
+        ctx.save_for_backward(w, u, k, v, state_out)
         return wkv, state_out[:, :, -1:]
 
     @staticmethod
@@ -88,7 +141,7 @@ class WkvWithEps(Function):
 
 
 def initial_state_with_eps(emb_dim: int) -> Tensor:
-    return torch.cat((torch.zeros(1, 2, 1, emb_dim), torch.full((1, 1, 1, emb_dim), float("-inf"))), dim=1)
+    return torch.zeros(1, 3, 1, emb_dim)
 
 
 def wkv_with_eps(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tensor) -> tuple[Tensor, Tensor]:

@@ -71,18 +71,23 @@ def wkv_vanilla_backward(
 
     for t in reversed(range(tsz)):
         kt, vt = k[:, t : t + 1], v[:, t : t + 1]
+        alpha_prev, beta_prev = alpha[:, :, t], beta[:, :, t]
         euk = torch.exp(u + kt)
         ek = torch.exp(kt)
 
-        alpha_prev, beta_prev = alpha[:, :, t], beta[:, :, t]
+        denom = beta_prev + euk
+        denom_sq = denom**2
 
         grad_wkvt = grad_wkv[:, t : t + 1]
 
         # Backpropagates wkv gradients.
-        grad_uk = grad_wkvt * euk * (beta_prev * vt - alpha_prev) / (beta_prev + euk) ** 2
+        grad_uk = grad_wkvt * euk * (beta_prev * vt - alpha_prev) / denom_sq
         grad_u += grad_uk.flatten(0, -2).sum(0)
         grad_k[:, t : t + 1] += grad_uk
-        grad_v[:, t : t + 1] += grad_wkvt * euk / (beta_prev + euk)
+        grad_v[:, t : t + 1] += grad_wkvt * euk / denom
+
+        grad_alpha_wkv = grad_wkvt / denom
+        grad_beta_wkv = -grad_wkvt * (euk * vt + alpha_prev) / denom_sq
 
         # Backpropagate alpha gradients.
         grad_w += (grad_alpha * ew * alpha_prev).flatten(0, -2).sum(0)
@@ -94,8 +99,8 @@ def wkv_vanilla_backward(
         grad_k[:, t : t + 1] += grad_beta * ek
 
         # Compute gradients for alpha and beta.
-        grad_alpha = grad_alpha * ew + grad_wkvt / (beta_prev + euk)
-        grad_beta = grad_beta * ew - grad_wkvt * (euk * vt + alpha_prev) / (beta_prev + euk) ** 2
+        grad_alpha = grad_alpha * ew + grad_alpha_wkv
+        grad_beta = grad_beta * ew + grad_beta_wkv
 
     return grad_w, grad_u, grad_k, grad_v, torch.stack((grad_alpha, grad_beta), dim=1)
 
