@@ -1,0 +1,2 @@
+include requirements*.txt
+recursive-include rwkv/ *.txt *.cpp *.h *.cu *.cuh *.pyi py.typed MANIFEST.in
