@@ -84,10 +84,7 @@ def wkv_with_eps_backward(
         e1 = torch.exp(eps_prev - tau)
         e2 = torch.exp(ukt - tau)
 
-        # TODO: I think these variables can be folded into the other variables...
-        euke = torch.exp(ukt + eps_prev)
-        ee = torch.exp(eps_prev)
-        euk = torch.exp(ukt)
+        euke = torch.exp(ukt + eps_prev - 2 * tau)
 
         denom = e1 * beta_prev + e2
         denom_sq = denom**2
@@ -102,7 +99,7 @@ def wkv_with_eps_backward(
 
         grad_alpha_wkv = grad_wkvt * e1 / denom
         grad_beta_wkv = -grad_wkvt * e1 * (e2 * vt + e1 * alpha_prev) / denom_sq
-        grad_eps_wkv = grad_wkvt * euke * (alpha_prev - vt * beta_prev) / (ee * beta_prev + euk) ** 2
+        grad_eps_wkv = grad_wkvt * euke * (alpha_prev - vt * beta_prev) / (e1 * beta_prev + e2) ** 2
 
         e1 = torch.exp(w + eps_prev - eps_curr)
         e2 = torch.exp(kt - eps_curr)
