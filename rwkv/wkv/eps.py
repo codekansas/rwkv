@@ -68,6 +68,7 @@ def wkv_with_eps_backward(
 
     alpha, beta, eps = state.chunk(3, dim=1)  # (B, 1, T + 1, D), (B, 1, T + 1, D), (B, 1, T + 1, D)
     grad_alpha, grad_beta, grad_eps = grad_state[:, :, 0].chunk(3, dim=1)  # (B, 1, D), (B, 1, D), (B, 1, D)
+    grad_eps = grad_eps.clone()
 
     grad_w = torch.zeros_like(w)
     grad_u = torch.zeros_like(u)
@@ -76,7 +77,8 @@ def wkv_with_eps_backward(
 
     for t in reversed(range(tsz)):
         kt, vt = k[:, t : t + 1], v[:, t : t + 1]
-        alpha_prev, beta_prev, eps_prev, eps_curr = alpha[:, :, t], beta[:, :, t], eps[:, :, t], eps[:, :, t + 1]
+        alpha_prev, beta_prev, eps_prev = alpha[:, :, t], beta[:, :, t], eps[:, :, t]
+        alpha_curr, beta_curr, eps_curr = alpha[:, :, t + 1], beta[:, :, t + 1], eps[:, :, t + 1]
         ukt = u + kt
         tau = torch.maximum(ukt, eps_prev)
         e1 = torch.exp(eps_prev - tau)
@@ -110,19 +112,19 @@ def wkv_with_eps_backward(
         grad_w += grad_alpha_we.flatten(0, -2).sum(0)
         grad_k[:, t : t + 1] += grad_alpha * e2 * vt
         grad_v[:, t : t + 1] += grad_alpha * e2
+        grad_eps += grad_alpha * -alpha_curr
 
         # Backpropagates beta gradients.
         grad_beta_we = grad_beta * e1 * beta_prev
         grad_w += grad_beta_we.flatten(0, -2).sum(0)
         grad_k[:, t : t + 1] += grad_beta * e2
+        grad_eps += grad_beta * -beta_curr
 
         # Backpropagates epsilon gradients.
         eps_grad_mask = w + eps_prev > kt
         grad_eps_we = torch.where(eps_grad_mask, grad_eps, torch.zeros_like(grad_eps))
         grad_w += grad_eps_we.flatten(0, -2).sum(0)
         grad_k[:, t : t + 1] += torch.where(eps_grad_mask, torch.zeros_like(grad_eps), grad_eps)
-
-        # breakpoint()
 
         # Computes gradients for alpha, beta and epsilon.
         grad_alpha = grad_alpha * e1 + grad_alpha_wkv

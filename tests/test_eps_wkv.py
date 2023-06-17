@@ -46,11 +46,9 @@ def test_eps_wkv() -> None:
     assert torch.allclose(out_full, out_partial)
 
 
-# @pytest.mark.parametrize("mode", ["state", "wkv", "both"])
-@pytest.mark.parametrize("mode", ["state"])
+@pytest.mark.parametrize("mode", ["state", "wkv", "both"])
 def test_eps_wkv_gradients(mode: str) -> None:
     bsz, tsz, chans = 2, 7, 16
-    tsz = 3  # TODO: Revert later
     device, dtype = torch.device("cpu"), torch.float64
 
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
@@ -78,8 +76,6 @@ def test_eps_wkv_gradients(mode: str) -> None:
     wkv_man, state_out_man = wkv_with_eps(wt, ut, kt, vt, statet)
     backprop(wkv_man, state_out_man)
     wgm, ugm, kgm, vgm, stategm = _get_grads(wt, ut, kt, vt, statet)
-
-    breakpoint()
 
     for gr, gm in zip((wgr, ugr, kgr, vgr, stategr), (wgm, ugm, kgm, vgm, stategm)):
         if gr is not None and gm is not None:
