@@ -82,6 +82,11 @@ def wkv_with_eps_backward(
         e1 = torch.exp(eps_prev - tau)
         e2 = torch.exp(ukt - tau)
 
+        # TODO: I think these variables can be folded into the other variables...
+        euke = torch.exp(ukt + eps_prev)
+        ee = torch.exp(eps_prev)
+        euk = torch.exp(ukt)
+
         denom = e1 * beta_prev + e2
         denom_sq = denom**2
 
@@ -94,23 +99,35 @@ def wkv_with_eps_backward(
         grad_v[:, t : t + 1] += grad_wkvt * e2 / denom
 
         grad_alpha_wkv = grad_wkvt * e1 / denom
-        grad_beta_wkv = -grad_wkvt * (e2 * vt + e1 * alpha_prev) / denom_sq
+        grad_beta_wkv = -grad_wkvt * e1 * (e2 * vt + e1 * alpha_prev) / denom_sq
+        grad_eps_wkv = grad_wkvt * euke * (alpha_prev - vt * beta_prev) / (ee * beta_prev + euk) ** 2
 
         e1 = torch.exp(w + eps_prev - eps_curr)
         e2 = torch.exp(kt - eps_curr)
 
         # Backpropagates alpha gradients.
-        grad_w += (grad_alpha * e1 * alpha_prev).flatten(0, -2).sum(0)
+        grad_alpha_we = grad_alpha * e1 * alpha_prev
+        grad_w += grad_alpha_we.flatten(0, -2).sum(0)
         grad_k[:, t : t + 1] += grad_alpha * e2 * vt
         grad_v[:, t : t + 1] += grad_alpha * e2
 
         # Backpropagates beta gradients.
-        grad_w += (grad_beta * e1 * beta_prev).flatten(0, -2).sum(0)
+        grad_beta_we = grad_beta * e1 * beta_prev
+        grad_w += grad_beta_we.flatten(0, -2).sum(0)
         grad_k[:, t : t + 1] += grad_beta * e2
 
-        # Computes gradients for alpha and beta.
+        # Backpropagates epsilon gradients.
+        eps_grad_mask = w + eps_prev > kt
+        grad_eps_we = torch.where(eps_grad_mask, grad_eps, torch.zeros_like(grad_eps))
+        grad_w += grad_eps_we.flatten(0, -2).sum(0)
+        grad_k[:, t : t + 1] += torch.where(eps_grad_mask, torch.zeros_like(grad_eps), grad_eps)
+
+        # breakpoint()
+
+        # Computes gradients for alpha, beta and epsilon.
         grad_alpha = grad_alpha * e1 + grad_alpha_wkv
         grad_beta = grad_beta * e1 + grad_beta_wkv
+        grad_eps = grad_alpha_we + grad_beta_we + grad_eps_we + grad_eps_wkv
 
     return grad_w, grad_u, grad_k, grad_v, torch.stack((grad_alpha, grad_beta, grad_eps), dim=1)
 

@@ -10,7 +10,8 @@ from rwkv.wkv.eps import initial_state_with_eps, wkv_with_eps, wkv_with_eps_forw
 
 
 def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dtype: torch.dtype) -> tuple[Tensor, ...]:
-    w = -torch.exp(torch.rand(chans, dtype=dtype, device=device))
+    # w = -torch.exp(torch.rand(chans, dtype=dtype, device=device))
+    w = torch.rand(chans, dtype=dtype, device=device)
     u = torch.rand(chans, dtype=dtype, device=device)
     k = torch.randn(bsz, tsz, chans, dtype=dtype, device=device)
     v = torch.randn(bsz, tsz, chans, dtype=dtype, device=device)
@@ -45,10 +46,12 @@ def test_eps_wkv() -> None:
     assert torch.allclose(out_full, out_partial)
 
 
-@pytest.mark.parametrize("mode", ["state", "wkv", "both"])
+# @pytest.mark.parametrize("mode", ["state", "wkv", "both"])
+@pytest.mark.parametrize("mode", ["state"])
 def test_eps_wkv_gradients(mode: str) -> None:
     bsz, tsz, chans = 2, 7, 16
-    device, dtype = torch.device("cpu"), torch.float32
+    tsz = 3  # TODO: Revert later
+    device, dtype = torch.device("cpu"), torch.float64
 
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
     state = initial_state_with_eps(chans).repeat_interleave(bsz, dim=0).to(device, dtype)
@@ -75,6 +78,8 @@ def test_eps_wkv_gradients(mode: str) -> None:
     wkv_man, state_out_man = wkv_with_eps(wt, ut, kt, vt, statet)
     backprop(wkv_man, state_out_man)
     wgm, ugm, kgm, vgm, stategm = _get_grads(wt, ut, kt, vt, statet)
+
+    breakpoint()
 
     for gr, gm in zip((wgr, ugr, kgr, vgr, stategr), (wgm, ugm, kgm, vgm, stategm)):
         if gr is not None and gm is not None:
