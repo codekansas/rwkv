@@ -5,6 +5,7 @@ This implementation uses log-space state variables, verses the original
 implementation which offsets the exponents.
 """
 
+import math
 import torch
 from torch import Tensor
 from torch.autograd.function import Function, FunctionCtx, once_differentiable
@@ -26,6 +27,8 @@ def wkv_log_space_forward(
 
     ln_alpha_p, ln_alpha_m, ln_beta = state[:, :, -1].chunk(3, dim=1)
 
+    log_eps = math.log(eps)
+
     wkvs = []
     ln_alpha_ps = [ln_alpha_p]
     ln_alpha_ms = [ln_alpha_m]
@@ -36,7 +39,7 @@ def wkv_log_space_forward(
         return max_av + torch.log(torch.exp(a - max_av) + torch.exp(b - max_av))
 
     def logsubexp(a: Tensor, b: Tensor) -> Tensor:
-        max_av = torch.maximum(a, b)
+        max_av = torch.maximum(torch.maximum(a, b), torch.full_like(a, log_eps))
         return max_av + torch.log(torch.exp(a - max_av) - torch.exp(b - max_av))
 
     for t in range(tsz):
@@ -45,6 +48,10 @@ def wkv_log_space_forward(
         v_minus = torch.clamp(-vt, min=0) + eps
         ln_v_p = torch.log(v_plus)
         ln_v_m = torch.log(v_minus)
+
+        ln_alpha_pn = torch.minimum(ln_alpha_p, ln_alpha_m) - eps
+        ln_alpha_p = logsubexp(ln_alpha_p, ln_alpha_pn)
+        ln_alpha_m = logsubexp(ln_alpha_m, ln_alpha_pn)
 
         ln_wkv_p = logaddexp(u + kt + ln_v_p, ln_alpha_p) - logaddexp(u + kt, ln_beta)
         ln_wkv_m = logaddexp(u + kt + ln_v_m, ln_alpha_m) - logaddexp(u + kt, ln_beta)
@@ -55,10 +62,6 @@ def wkv_log_space_forward(
         ln_alpha_p = logaddexp(w + ln_alpha_p, kt + ln_v_p)
         ln_alpha_m = logaddexp(w + ln_alpha_m, kt + ln_v_m)
         ln_beta = logaddexp(w + ln_beta, kt)
-
-        ln_alpha_pn = torch.minimum(ln_alpha_p, ln_alpha_m) - eps
-        ln_alpha_p = logsubexp(ln_alpha_p, ln_alpha_pn)
-        ln_alpha_m = logsubexp(ln_alpha_m, ln_alpha_pn)
 
         ln_alpha_ps.append(ln_alpha_p)
         ln_alpha_ms.append(ln_alpha_m)
