@@ -90,8 +90,7 @@ def wkv_log_space_backward(
     assert grad_wkv.shape == (bsz, tsz, chans)
     assert grad_state.shape == (bsz, 3, 1, chans)
 
-    ln_alpha_p, ln_alpha_m, ln_beta = state.chunk(3, dim=1)
-    grad_ln_alpha_p, grad_ln_alpha_m, grad_ln_beta = grad_state.chunk(3, dim=1)
+    grad_ln_alpha_p, grad_ln_alpha_m, grad_ln_beta = grad_state[:, :, 0].chunk(3, dim=1)
 
     grad_w = torch.zeros_like(w)
     grad_u = torch.zeros_like(u)
@@ -104,18 +103,51 @@ def wkv_log_space_backward(
         ln_v_p, ln_v_m = torch.log(vt_p), torch.log(vt_m)
 
         ln_alpha_p_prev, ln_alpha_m_prev, ln_beta_prev = state[:, :, t].chunk(3, dim=1)
-        ln_alpha_p_curr, ln_alpha_m_curr, ln_beta_curr = state[:, :, t + 1].chunk(3, dim=1)
 
-        breakpoint()
+        grad_wkv_p = grad_wkv[:, t : t + 1]
+        grad_wkv_m = -grad_wkv_p
 
-        euk = torch.exp(-u - kt)
+        uk = u + kt
+        ukv_p, ukv_m = uk + ln_v_p, uk + ln_v_m
 
-        grad_wkvt_p = grad_wkv[:, t : t + 1]
-        grad_wkvt_n = -grad_wkvt_p
+        # Backpropagates wkv gradients.
+        e_num_p = torch.exp(ln_alpha_p_prev - ukv_p)
+        e_num_m = torch.exp(ln_alpha_m_prev - ukv_m)
+        e_den = torch.exp(ln_beta_prev - uk)
+        grad_wkv_num = grad_wkv_p / (1 + e_num_p) + grad_wkv_m / (1 + e_num_m)
+        grad_wkv_den = grad_wkv_p / (1 + e_den) + grad_wkv_m / (1 + e_den)
+        grad_uk = grad_wkv_num + grad_wkv_den
+        grad_u += grad_uk.flatten(0, -2).sum(0)
+        grad_k[:, t : t + 1] += grad_uk
+        grad_v[:, t : t + 1] += grad_wkv_num / vt
 
-        grad_uk_p = grad_wkvt_p * vt_p / (vt_p + alpha_p_prev * euk)
+        grad_ln_alpha_wkv_p = grad_wkv_p / (1 + (1 / e_num_p))
+        grad_ln_alpha_wkv_m = grad_wkv_m / (1 + (1 / e_num_m))
+        grad_ln_beta_wkv = grad_wkv_p / (1 + (1 / e_den)) + grad_wkv_m / (1 + (1 / e_den))
 
-    return grad_w, grad_u, grad_k, grad_v, grad_state
+        # Backpropagates alpha gradients.
+        e_alpha_p = torch.exp(kt + ln_v_p - (w + ln_alpha_p_prev))
+        e_alpha_m = torch.exp(kt + ln_v_m - (w + ln_alpha_m_prev))
+        grad_wa_p = grad_ln_alpha_p / (1 + e_alpha_p)
+        grad_wa_m = grad_ln_alpha_m / (1 + e_alpha_m)
+        grad_w += (grad_wa_p + grad_wa_m).flatten(0, 2).sum(0)
+        grad_k[:, t : t + 1] += grad_ln_alpha_p / (1 + (1 / e_alpha_p)) + grad_ln_alpha_m / (1 + (1 / e_alpha_m))
+        grad_v[:, t : t + 1] += (grad_ln_alpha_p / (vt * (1 + (1 / e_alpha_p))) + grad_ln_alpha_m / (vt * (1 + (1 / e_alpha_m))))
+
+        # Backpropagates beta gradients.
+        e_beta = torch.exp(kt - w - ln_beta_prev)
+        grad_wb = grad_ln_beta / (1 + e_beta)
+        grad_w += grad_wb.flatten(0, 2).sum(0)
+        grad_k[:, t : t + 1] += grad_ln_beta / (1 + (1 / e_beta))
+
+        # breakpoint()
+
+        # Compute gradients for log alpha and log beta.
+        grad_ln_alpha_p = grad_wa_p + grad_ln_alpha_wkv_p
+        grad_ln_alpha_m = grad_wa_m + grad_ln_alpha_wkv_m
+        grad_ln_beta = grad_wb + grad_ln_beta_wkv
+
+    return grad_w, grad_u, grad_k, grad_v, torch.stack((grad_ln_alpha_p, grad_ln_alpha_m, grad_ln_beta), dim=1)
 
 
 class WkvLogSpace(Function):
