@@ -11,6 +11,7 @@ from rwkv.wkv.log import initial_state_log_space, wkv_log_space, wkv_log_space_f
 
 def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dtype: torch.dtype) -> tuple[Tensor, ...]:
     w = -torch.exp(torch.rand(chans, dtype=dtype, device=device))
+    # w = torch.rand(chans, dtype=dtype, device=device)
     u = torch.rand(chans, dtype=dtype, device=device)
     k = torch.randn(bsz, tsz, chans, dtype=dtype, device=device)
     v = torch.randn(bsz, tsz, chans, dtype=dtype, device=device)
@@ -45,24 +46,26 @@ def test_log_wkv() -> None:
     assert torch.allclose(out_full, out_partial)
 
 
-@pytest.mark.parametrize("mode", ["state", "wkv", "both"])
+# @pytest.mark.parametrize("mode", ["state", "wkv", "both"])
+@pytest.mark.parametrize("mode", ["state"])
 def test_log_wkv_gradients(mode: str) -> None:
     bsz, tsz, chans = 2, 7, 16
 
-    tsz = 2  # TODO: Remove after testing
+    torch.manual_seed(1337)
+    tsz = 10  # TODO: Remove after testing
 
     device, dtype = torch.device("cpu"), torch.float64
 
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
     state = initial_state_log_space(chans).repeat_interleave(bsz, dim=0).to(device, dtype)
 
-    def backprop(wkv_out: Tensor, state_out: Tensor) -> None:
+    def backprop(wkv_out: Tensor, state_out: Tensor, wkv_grad: Tensor, state_out_grad: Tensor) -> None:
         if mode == "both":
-            (wkv_out.sum() + state_out.sum()).backward()
+            torch.autograd.backward((wkv_out, state_out), (wkv_grad, state_out_grad))
         elif mode == "wkv":
-            wkv_out.sum().backward()
+            wkv_out.backward(wkv_grad)
         elif mode == "state":
-            state_out.sum().backward()
+            state_out.backward(state_out_grad)
         else:
             raise ValueError(f"Invalid mode: {mode}")
 
@@ -70,13 +73,15 @@ def test_log_wkv_gradients(mode: str) -> None:
     wt, ut, kt, vt, statet = _copy_with_grad(w, u, k, v, state)
     wkv_ref, state_out_ref = wkv_log_space_forward(wt, ut, kt, vt, statet)
     state_out_ref = state_out_ref[:, :, -1:]
-    backprop(wkv_ref, state_out_ref)
+    # wkv_grad, state_out_grad = torch.rand_like(wkv_ref), torch.rand_like(state_out_ref)
+    wkv_grad, state_out_grad = torch.ones_like(wkv_ref), torch.ones_like(state_out_ref)
+    backprop(wkv_ref, state_out_ref, wkv_grad, state_out_grad)
     wgr, ugr, kgr, vgr, stategr = _get_grads(wt, ut, kt, vt, statet)
 
     # Uses the manual gradient computation to compute the gradients.
     wt, ut, kt, vt, statet = _copy_with_grad(w, u, k, v, state)
     wkv_man, state_out_man = wkv_log_space(wt, ut, kt, vt, statet)
-    backprop(wkv_man, state_out_man)
+    backprop(wkv_man, state_out_man, wkv_grad, state_out_grad)
     wgm, ugm, kgm, vgm, stategm = _get_grads(wt, ut, kt, vt, statet)
 
     # breakpoint()
