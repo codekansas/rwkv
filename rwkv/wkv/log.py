@@ -6,6 +6,7 @@ implementation which offsets the exponents.
 """
 
 import math
+
 import torch
 from torch import Tensor
 from torch.autograd.function import Function, FunctionCtx, once_differentiable
@@ -44,10 +45,8 @@ def wkv_log_space_forward(
 
     for t in range(tsz):
         kt, vt = k[:, t : t + 1], v[:, t : t + 1]
-        v_plus = torch.clamp(vt, min=0) + eps
-        v_minus = torch.clamp(-vt, min=0) + eps
-        ln_v_p = torch.log(v_plus)
-        ln_v_m = torch.log(v_minus)
+        vt_p, vt_m = torch.clamp(vt, min=0) + eps, torch.clamp(-vt, min=0) + eps
+        ln_v_p, ln_v_m = torch.log(vt_p), torch.log(vt_m)
 
         ln_alpha_pn = torch.minimum(ln_alpha_p, ln_alpha_m) - eps
         ln_alpha_p = logsubexp(ln_alpha_p, ln_alpha_pn)
@@ -91,7 +90,8 @@ def wkv_log_space_backward(
     assert grad_wkv.shape == (bsz, tsz, chans)
     assert grad_state.shape == (bsz, 3, 1, chans)
 
-    ln_alpha_p, ln_alpha_m, log_beta = state.chunk(3, dim=1)
+    ln_alpha_p, ln_alpha_m, ln_beta = state.chunk(3, dim=1)
+    grad_ln_alpha_p, grad_ln_alpha_m, grad_ln_beta = grad_state.chunk(3, dim=1)
 
     grad_w = torch.zeros_like(w)
     grad_u = torch.zeros_like(u)
@@ -100,7 +100,22 @@ def wkv_log_space_backward(
 
     for t in reversed(range(tsz)):
         kt, vt = k[:, t : t + 1], v[:, t : t + 1]
-        ln_alpha_p_prev, ln_alpha_m_prev, ln_beta_prev = ln_alpha_p[:, :, t], ln_alpha_m[:, :, t], log_beta[:, :, t]
+        vt_p, vt_m = torch.clamp(vt, min=0) + 1e-5, torch.clamp(-vt, min=0) + 1e-5
+        ln_v_p, ln_v_m = torch.log(vt_p), torch.log(vt_m)
+
+        ln_alpha_p_prev, ln_alpha_m_prev, ln_beta_prev = state[:, :, t].chunk(3, dim=1)
+        ln_alpha_p_curr, ln_alpha_m_curr, ln_beta_curr = state[:, :, t + 1].chunk(3, dim=1)
+
+        breakpoint()
+
+        euk = torch.exp(-u - kt)
+
+        grad_wkvt_p = grad_wkv[:, t : t + 1]
+        grad_wkvt_n = -grad_wkvt_p
+
+        grad_uk_p = grad_wkvt_p * vt_p / (vt_p + alpha_p_prev * euk)
+
+    return grad_w, grad_u, grad_k, grad_v, grad_state
 
 
 class WkvLogSpace(Function):
