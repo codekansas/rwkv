@@ -10,9 +10,11 @@ from torch.autograd.function import Function, FunctionCtx, once_differentiable
 
 
 def wkv_with_eps_forward(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tensor) -> tuple[Tensor, Tensor]:
-    assert w.dim() == u.dim() == 1
-    assert k.dim() == v.dim() == 3
-    assert state.dim() == 4
+    bsz, tsz, chans = k.shape
+
+    assert w.shape == u.shape == (chans,)
+    assert v.shape == (bsz, tsz, chans)
+    assert state.shape == (bsz, 3, 1, chans)
 
     alpha, beta, eps = state[:, :, -1].chunk(3, dim=1)  # (B, 1, D), (B, 1, D), (B, 1, D)
 
@@ -60,6 +62,7 @@ def wkv_with_eps_backward(
     grad_state: Tensor,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     bsz, tsz, chans = k.shape
+
     assert w.shape == u.shape == (chans,)
     assert v.shape == (bsz, tsz, chans)
     assert state.shape == (bsz, 3, tsz + 1, chans)

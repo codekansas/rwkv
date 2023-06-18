@@ -18,33 +18,57 @@ def wkv_log_space_forward(
     state: Tensor,
     eps: float = 1e-5,
 ) -> tuple[Tensor, Tensor]:
-    assert w.dim() == u.dim() == 1
-    assert k.dim() == v.dim() == state.dim()
+    bsz, tsz, chans = k.shape
 
-    log_alpha_plus, log_alpha_minus, log_beta = state.chunk(3, dim=1)
+    assert w.shape == u.shape == (chans,)
+    assert v.shape == (bsz, tsz, chans)
+    assert state.shape == (bsz, 3, 1, chans)
 
-    _, tsz, _ = k.shape
+    ln_alpha_p, ln_alpha_m, ln_beta = state[:, :, -1].chunk(3, dim=1)
 
     wkvs = []
+    ln_alpha_ps = [ln_alpha_p]
+    ln_alpha_ms = [ln_alpha_m]
+    ln_betas = [ln_beta]
+
+    def logaddexp(a: Tensor, b: Tensor) -> Tensor:
+        max_av = torch.maximum(a, b)
+        return max_av + torch.log(torch.exp(a - max_av) + torch.exp(b - max_av))
+
+    def logsubexp(a: Tensor, b: Tensor) -> Tensor:
+        max_av = torch.maximum(a, b)
+        return max_av + torch.log(torch.exp(a - max_av) - torch.exp(b - max_av))
 
     for t in range(tsz):
         kt, vt = k[:, t : t + 1], v[:, t : t + 1]
         v_plus = torch.clamp(vt, min=0) + eps
         v_minus = torch.clamp(-vt, min=0) + eps
-        log_v_plus = torch.log(v_plus)
-        log_v_minus = torch.log(v_minus)
+        ln_v_p = torch.log(v_plus)
+        ln_v_m = torch.log(v_minus)
 
-        log_wkv_plus = torch.logaddexp(u + kt + log_v_plus, log_alpha_plus) - torch.logaddexp(u + kt, log_beta)
-        log_wkv_minus = torch.logaddexp(u + kt + log_v_minus, log_alpha_minus) - torch.logaddexp(u + kt, log_beta)
+        ln_wkv_p = logaddexp(u + kt + ln_v_p, ln_alpha_p) - logaddexp(u + kt, ln_beta)
+        ln_wkv_m = logaddexp(u + kt + ln_v_m, ln_alpha_m) - logaddexp(u + kt, ln_beta)
 
-        wkv = torch.exp(log_wkv_plus) - torch.exp(log_wkv_minus)
+        wkv = torch.exp(ln_wkv_p) - torch.exp(ln_wkv_m)
         wkvs.append(wkv)
 
-        log_alpha_plus = torch.logaddexp(w + log_alpha_plus, kt + log_v_plus)
-        log_alpha_minus = torch.logaddexp(w + log_alpha_minus, kt + log_v_minus)
-        log_beta = torch.logaddexp(w + log_beta, kt)
+        ln_alpha_p = logaddexp(w + ln_alpha_p, kt + ln_v_p)
+        ln_alpha_m = logaddexp(w + ln_alpha_m, kt + ln_v_m)
+        ln_beta = logaddexp(w + ln_beta, kt)
 
-    return torch.cat(wkvs, 1), torch.cat((log_alpha_plus, log_alpha_minus, log_beta), dim=1)
+        ln_alpha_pn = torch.minimum(ln_alpha_p, ln_alpha_m) - eps
+        ln_alpha_p = logsubexp(ln_alpha_p, ln_alpha_pn)
+        ln_alpha_m = logsubexp(ln_alpha_m, ln_alpha_pn)
+
+        ln_alpha_ps.append(ln_alpha_p)
+        ln_alpha_ms.append(ln_alpha_m)
+        ln_betas.append(ln_beta)
+
+    ln_alpha_p = torch.stack(ln_alpha_ps, dim=2)
+    ln_alpha_m = torch.stack(ln_alpha_ms, dim=2)
+    ln_beta = torch.stack(ln_betas, dim=2)
+
+    return torch.cat(wkvs, 1), torch.cat((ln_alpha_p, ln_alpha_m, ln_beta), dim=1)
 
 
 def wkv_log_space_backward(
@@ -56,7 +80,24 @@ def wkv_log_space_backward(
     grad_wkv: Tensor,
     grad_state: Tensor,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-    raise NotImplementedError
+    bsz, tsz, chans = k.shape
+
+    assert w.shape == u.shape == (chans,)
+    assert v.shape == (bsz, tsz, chans)
+    assert state.shape == (bsz, 3, tsz + 1, chans)
+    assert grad_wkv.shape == (bsz, tsz, chans)
+    assert grad_state.shape == (bsz, 3, 1, chans)
+
+    ln_alpha_p, ln_alpha_m, log_beta = state.chunk(3, dim=1)
+
+    grad_w = torch.zeros_like(w)
+    grad_u = torch.zeros_like(u)
+    grad_k = torch.zeros_like(k)
+    grad_v = torch.zeros_like(v)
+
+    for t in reversed(range(tsz)):
+        kt, vt = k[:, t : t + 1], v[:, t : t + 1]
+        ln_alpha_p_prev, ln_alpha_m_prev, ln_beta_prev = ln_alpha_p[:, :, t], ln_alpha_m[:, :, t], log_beta[:, :, t]
 
 
 class WkvLogSpace(Function):
@@ -69,8 +110,9 @@ class WkvLogSpace(Function):
         v: Tensor,
         state: Tensor,
     ) -> tuple[Tensor, Tensor]:
-        ctx.save_for_backward(w, u, k, v, state)
-        return wkv_log_space_forward(w, u, k, v, state)
+        wkv, state_out = wkv_log_space_forward(w, u, k, v, state)
+        ctx.save_for_backward(w, u, k, v, state_out)
+        return wkv, state_out[:, :, -1:]
 
     @staticmethod
     @once_differentiable
@@ -84,7 +126,7 @@ class WkvLogSpace(Function):
 
 
 def initial_state_log_space(emb_dim: int) -> Tensor:
-    return torch.full((1, 3, emb_dim), float("-inf"))
+    return torch.full((1, 3, 1, emb_dim), float("-inf"))
 
 
 def wkv_log_space(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tensor) -> tuple[Tensor, Tensor]:

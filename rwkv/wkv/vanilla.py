@@ -12,6 +12,7 @@ from torch.autograd.function import Function, FunctionCtx, once_differentiable
 
 def wkv_vanilla_forward(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tensor) -> tuple[Tensor, Tensor]:
     bsz, tsz, chans = k.shape
+
     assert w.shape == u.shape == (chans,)
     assert v.shape == (bsz, tsz, chans)
     assert state.shape == (bsz, 2, 1, chans)
@@ -53,6 +54,7 @@ def wkv_vanilla_backward(
     grad_state: Tensor,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     bsz, tsz, chans = k.shape
+
     assert w.shape == u.shape == (chans,)
     assert v.shape == (bsz, tsz, chans)
     assert state.shape == (bsz, 2, tsz + 1, chans)
