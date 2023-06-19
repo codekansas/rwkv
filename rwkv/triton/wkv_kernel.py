@@ -1,4 +1,4 @@
-# mypy: disable-error-code="no-untyped-def, override"
+# mypy: disable-error-code="import, no-untyped-def, override"
 # ruff: noqa: ANN001, ANN201, ANN202, N803, N806
 """Defines a Triton kernel for the RWKV forward and backward passes.
 
@@ -20,105 +20,15 @@ def _forward_kernel(
     u_ptr,
     k_ptr,
     v_ptr,
-    num_ptr,
-    den_ptr,
+    alpha_ptr,
+    beta_ptr,
+    eps_ptr,
     chans,
     tsz,
     out_ptr,
-    num_out_ptr,
-    den_out_ptr,
-):
-    # Parallelize over the batch and channel dimensions.
-    b_idx = tl.program_id(0)
-    c_idx = tl.program_id(1)
-
-    chans_tsz = chans * tsz
-
-    # Pointers to the batch (and possibly channel) for the input tensors.
-    k_ptr = k_ptr + b_idx * chans_tsz + c_idx
-    v_ptr = v_ptr + b_idx * chans_tsz + c_idx
-    num_ptr = num_ptr + b_idx * chans + c_idx
-    den_ptr = den_ptr + b_idx * chans + c_idx
-    w_ptr = w_ptr + c_idx
-    u_ptr = u_ptr + c_idx
-
-    # Pointers to the batch (and possibly channel) for the output tensors.
-    out_ptr = out_ptr + b_idx * chans_tsz + c_idx
-    num_out_ptr = num_out_ptr + b_idx * chans + c_idx
-    den_out_ptr = den_out_ptr + b_idx * chans + c_idx
-
-    # Loads parameters.
-    num = tl.load(num_ptr).to(tl.float32)
-    den = tl.load(den_ptr).to(tl.float32)
-    w = -tl.exp(tl.load(w_ptr).to(tl.float32))
-    u = tl.load(u_ptr).to(tl.float32)
-
-    ew = tl.exp(w)
-
-    for t in range(tsz):
-        tc = t * chans
-
-        kt = tl.load(k_ptr + tc).to(tl.float32)
-        vt = tl.load(v_ptr + tc).to(tl.float32)
-
-        euk = tl.exp(u + kt)
-
-        out = (num + euk * vt) / (den + euk)
-        tl.store(out_ptr + tc, out)
-
-        ek = tl.exp(kt)
-        num = ew * num + ek * vt
-        den = ew * den + ek
-
-    tl.store(num_out_ptr, num)
-    tl.store(den_out_ptr, den)
-
-
-def _forward(
-    w: Tensor,
-    u: Tensor,
-    k: Tensor,
-    v: Tensor,
-    num: Tensor,
-    den: Tensor,
-) -> tuple[Tensor, Tensor, Tensor]:
-    bsz, tsz, chans = k.shape
-
-    # New tensors to output.
-    out = k.new_empty(bsz, tsz, chans)
-    num_out = k.new_empty(bsz, 1, chans)
-    den_out = k.new_empty(bsz, 1, chans)
-
-    _forward_kernel[(bsz, chans)](
-        w,
-        u,
-        k,
-        v,
-        num,
-        den,
-        chans,
-        tsz,
-        out,
-        num_out,
-        den_out,
-    )
-
-    return out, num_out, den_out
-
-
-@triton.jit
-def _forward_kernel_2(
-    w_ptr,  # (C)
-    u_ptr,  # (C)
-    k_ptr,  # (B, T, C)
-    v_ptr,  # (B, T, C)
-    alpha_ptr,  # (B, C)
-    beta_ptr,  # (B, C)
-    chans,
-    tsz,
-    out_ptr,  # (B, T, C)
-    num_out_ptr,  # (B, C)
-    den_out_ptr,  # (B, C)
+    alpha_out_ptr,
+    beta_out_ptr,
+    eps_out_ptr,
 ):
     # Parallelize over the batch and channel dimensions.
     b_idx = tl.program_id(0)
@@ -136,8 +46,8 @@ def _forward_kernel_2(
 
     # Pointers to the batch (and possibly channel) for the output tensors.
     out_ptr = out_ptr + b_idx * chans_tsz + c_idx
-    num_out_ptr = num_out_ptr + b_idx * chans + c_idx
-    den_out_ptr = den_out_ptr + b_idx * chans + c_idx
+    alpha_out_ptr = alpha_out_ptr + b_idx * chans + c_idx
+    beta_out_ptr = beta_out_ptr + b_idx * chans + c_idx
 
     # Loads parameters.
     alpha = tl.load(alpha_ptr).to(tl.float32)
@@ -145,7 +55,7 @@ def _forward_kernel_2(
     w = -tl.exp(tl.load(w_ptr).to(tl.float32))
     u = tl.load(u_ptr).to(tl.float32)
 
-    eps = -1e38
+    ew = tl.exp(w)
 
     for t in range(tsz):
         tc = t * chans
@@ -153,30 +63,20 @@ def _forward_kernel_2(
         kt = tl.load(k_ptr + tc).to(tl.float32)
         vt = tl.load(v_ptr + tc).to(tl.float32)
 
-        no = tl.maximum(eps, u + kt)
-        eo = tl.exp(eps - no)
-        euk = tl.exp(u + kt - no)
+        euk = tl.exp(u + kt)
 
-        out = (eo * alpha + euk * vt) / (eo * beta + euk)
+        out = (alpha + euk * vt) / (beta + euk)
         tl.store(out_ptr + tc, out)
 
-        nwo = tl.maximum(w + eps, kt)
-        ew = tl.exp(w + eps - nwo)
-        ek = tl.exp(kt - nwo)
+        ek = tl.exp(kt)
         alpha = ew * alpha + ek * vt
         beta = ew * beta + ek
 
-        eps = nwo
-
-    ew = tl.exp(eps)
-    alpha = ew * alpha
-    beta = ew * beta
-
-    tl.store(num_out_ptr, alpha)
-    tl.store(den_out_ptr, beta)
+    tl.store(alpha_out_ptr, alpha)
+    tl.store(beta_out_ptr, beta)
 
 
-def _forward_2(
+def _forward(
     w: Tensor,
     u: Tensor,
     k: Tensor,
@@ -193,13 +93,14 @@ def _forward_2(
     beta_out = k.new_empty(bsz, 1, chans)
     eps_out = k.new_empty(bsz, 1, chans)
 
-    _forward_kernel_2[(bsz, chans)](
+    _forward_kernel[(bsz, chans)](
         w,
         u,
         k,
         v,
         alpha,
         beta,
+        eps,
         chans,
         tsz,
         out,
@@ -218,19 +119,21 @@ def _backward_kernel(
     k_ptr,
     v_ptr,
     out_ptr,
-    num_out_ptr,
-    den_out_ptr,
+    alpha_out_ptr,
+    beta_out_ptr,
+    eps_out_ptr,
     chans,
     tsz,
     gout_ptr,
-    gnum_out_ptr,
-    gden_out_ptr,
+    galpha_out_ptr,
+    gbeta_out_ptr,
+    geps_out_ptr,
     gw_ptr,
     gu_ptr,
     gk_ptr,
     gv_ptr,
-    gnum_ptr,
-    gden_ptr,
+    galpha_ptr,
+    gbeta_ptr,
 ):
     # Parallelize over the batch and channel dimensions.
     b_idx = tl.program_id(0)
@@ -242,27 +145,27 @@ def _backward_kernel(
     k_ptr = k_ptr + b_idx * chans_tsz + c_idx
     v_ptr = v_ptr + b_idx * chans_tsz + c_idx
     out_ptr = out_ptr + b_idx * chans_tsz + c_idx
-    num_out_ptr = num_out_ptr + b_idx * chans + c_idx
-    den_out_ptr = den_out_ptr + b_idx * chans + c_idx
+    alpha_out_ptr = alpha_out_ptr + b_idx * chans + c_idx
+    beta_out_ptr = beta_out_ptr + b_idx * chans + c_idx
     w_ptr = w_ptr + c_idx
     u_ptr = u_ptr + c_idx
     gout_ptr = gout_ptr + b_idx * chans_tsz + c_idx
-    gnum_out_ptr = gnum_out_ptr + b_idx * chans + c_idx
-    gden_out_ptr = gden_out_ptr + b_idx * chans + c_idx
+    galpha_out_ptr = galpha_out_ptr + b_idx * chans + c_idx
+    gbeta_out_ptr = gbeta_out_ptr + b_idx * chans + c_idx
 
     # Pointers to the batch (and possibly channel) for the output tensors.
     gw_ptr = gw_ptr + c_idx
     gu_ptr = gu_ptr + c_idx
     gk_ptr = gk_ptr + b_idx * chans_tsz + c_idx
     gv_ptr = gv_ptr + b_idx * chans_tsz + c_idx
-    gnum_ptr = gnum_ptr + b_idx * chans + c_idx
-    gden_ptr = gden_ptr + b_idx * chans + c_idx
+    galpha_ptr = galpha_ptr + b_idx * chans + c_idx
+    gbeta_ptr = gbeta_ptr + b_idx * chans + c_idx
 
     # Loads parameters.
-    tl.load(num_out_ptr).to(tl.float32)
-    tl.load(den_out_ptr).to(tl.float32)
-    gnum = tl.load(gnum_out_ptr).to(tl.float32)
-    gden = tl.load(gden_out_ptr).to(tl.float32)
+    tl.load(alpha_out_ptr).to(tl.float32)
+    tl.load(beta_out_ptr).to(tl.float32)
+    galpha = tl.load(galpha_out_ptr).to(tl.float32)
+    gbeta = tl.load(gbeta_out_ptr).to(tl.float32)
     w = -tl.exp(tl.load(w_ptr).to(tl.float32))
     tl.exp(w)
     u = tl.load(u_ptr).to(tl.float32)
@@ -274,8 +177,8 @@ def _backward_kernel(
         tl.exp(kt)
         tl.exp(u + kt)
 
-    tl.store(gnum_ptr, gnum)
-    tl.store(gden_ptr, gden)
+    tl.store(galpha_ptr, galpha)
+    tl.store(gbeta_ptr, gbeta)
 
 
 def _backward(
@@ -284,12 +187,14 @@ def _backward(
     k: Tensor,
     v: Tensor,
     out: Tensor,
-    num_out: Tensor,
-    den_out: Tensor,
+    alpha_out: Tensor,
+    beta_out: Tensor,
+    eps_out: Tensor,
     gout: Tensor,
-    gnum_out: Tensor,
-    gden_out: Tensor,
-) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    galpha_out: Tensor,
+    gbeta_out: Tensor,
+    geps_out: Tensor,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     bsz, tsz, chans = k.shape
 
     # New tensors to output.
@@ -297,8 +202,9 @@ def _backward(
     gu = k.new_empty(chans)
     gk = k.new_empty(bsz, tsz, chans)
     gv = k.new_empty(bsz, tsz, chans)
-    gnum = k.new_empty(bsz, 1, chans)
-    gden = k.new_empty(bsz, 1, chans)
+    galpha = k.new_empty(bsz, 1, chans)
+    gbeta = k.new_empty(bsz, 1, chans)
+    geps = k.new_empty(bsz, 1, chans)
 
     _backward_kernel[(bsz, chans)](
         w,
@@ -306,22 +212,25 @@ def _backward(
         k,
         v,
         out,
-        num_out,
-        den_out,
+        alpha_out,
+        beta_out,
+        eps_out,
         chans,
         tsz,
         gout,
-        gnum_out,
-        gden_out,
+        galpha_out,
+        gbeta_out,
+        geps_out,
         gw,
         gu,
         gk,
         gv,
-        gnum,
-        gden,
+        galpha,
+        gbeta,
+        geps,
     )
 
-    return gw, gu, gk, gv, gnum, gden
+    return gw, gu, gk, gv, galpha, gbeta
 
 
 class _WKV(Function):
@@ -355,18 +264,15 @@ class _WKV(Function):
         for t in (v, alpha, beta, w, u):
             assert t.dtype == dtype and t.device == device
 
-        # This is some code for testing stuff.
-        # import torch
-        # num.copy_(torch.randn_like(num))
-        # den.copy_(torch.randn_like(den))
-        # num.copy_(torch.arange(num.shape[-1])[None, None, :].repeat(num.shape[0], 1, 1))
-        # den.copy_(torch.arange(den.shape[-1])[None, None, :].repeat(den.shape[0], 1, 1))
-
-        out, alpha_out, beta_out, eps_out = _forward(w, u, k, v, alpha, beta, eps)
-        # out2, num_out2, den_out2 = _forward_2(w, u, k, v, num, den)
-        # breakpoint()
-
-        # out, num_out, den_out = _forward_2(w, u, k, v, num, den)
+        out, alpha_out, beta_out, eps_out = _forward(
+            w,
+            u,
+            k,
+            v,
+            alpha,
+            beta,
+            eps,
+        )
 
         ctx.save_for_backward(w, u, k, v, out, alpha_out, beta_out, eps_out)
 
@@ -377,15 +283,26 @@ class _WKV(Function):
     def backward(
         ctx: FunctionCtx,
         gout: Tensor,
-        gnum_out: Tensor,
-        gden_out: Tensor,
-        geps_out: None,
+        galpha_out: Tensor,
+        gbeta_out: Tensor,
+        geps_out: Tensor,
     ) -> tuple[Tensor, ...]:
-        # w, u, k, v, out, num_out, den_out = ctx.saved_tensors
-        # gw, gu, gk, gv, gn, gd = _backward(w, u, k, v, out, num_out, den_out, gout, gnum_out, gden_out)
-        # return gw, gu, gk, gv, gn, gd
-
-        raise NotImplementedError
+        w, u, k, v, out, alpha_out, beta_out, eps_out = ctx.saved_tensors
+        gw, gu, gk, gv, ga, gb, ge = _backward(
+            w,
+            u,
+            k,
+            v,
+            out,
+            alpha_out,
+            beta_out,
+            eps_out,
+            gout,
+            galpha_out,
+            gbeta_out,
+            geps_out,
+        )
+        return gw, gu, gk, gv, ga, gb, ge
 
 
 def triton_wkv(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tensor) -> tuple[Tensor, Tensor]:

@@ -1,5 +1,3 @@
-# mypy: disable-error-code="import"
-# ruff: noqa: ANN001, ANN201, ANN202, N803, N806
 """Implements the WKV part of the RWKV model.
 
 This provides a few different implementations of the WKV algorithm, which
@@ -46,7 +44,7 @@ def get_wkv_fn(emb_dim: int, impl: WkvImpl | None = None) -> tuple[WkvFn, WkvIni
     """
     if impl is None or impl == "triton":
         try:
-            from rwkv.triton.wkv_kernel import triton_wkv, initial_state_triton
+            from rwkv.triton.wkv_kernel import initial_state_triton, triton_wkv
 
             return triton_wkv, initial_state_triton(emb_dim)
 

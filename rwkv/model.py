@@ -52,7 +52,7 @@ from ml.utils.large_models import init_empty_weights, meta_to_empty_func
 from ml.utils.timer import Timer
 from torch import Tensor, nn
 
-from rwkv.wkv import get_wkv_fn, WkvImpl
+from rwkv.wkv import WkvImpl, get_wkv_fn
 
 logger = logging.getLogger(__name__)
 
