@@ -47,12 +47,12 @@ def test_log_wkv() -> None:
 
 
 # @pytest.mark.parametrize("mode", ["state", "wkv", "both"])
-@pytest.mark.parametrize("mode", ["state"])
+@pytest.mark.parametrize("mode", ["wkv"])
 def test_log_wkv_gradients(mode: str) -> None:
     bsz, tsz, chans = 2, 7, 16
 
     torch.manual_seed(1337)
-    tsz = 10  # TODO: Remove after testing
+    tsz = 5  # TODO: Remove after testing
 
     device, dtype = torch.device("cpu"), torch.float64
 
@@ -84,7 +84,7 @@ def test_log_wkv_gradients(mode: str) -> None:
     backprop(wkv_man, state_out_man, wkv_grad, state_out_grad)
     wgm, ugm, kgm, vgm, stategm = _get_grads(wt, ut, kt, vt, statet)
 
-    # breakpoint()
+    breakpoint()
 
     for gr, gm in zip((wgr, ugr, kgr, vgr, stategr), (wgm, ugm, kgm, vgm, stategm)):
         if gr is not None and gm is not None:
