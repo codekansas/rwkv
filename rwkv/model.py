@@ -52,7 +52,7 @@ from ml.utils.large_models import init_empty_weights, meta_to_empty_func
 from ml.utils.timer import Timer
 from torch import Tensor, nn
 
-from rwkv.wkv import get_wkv_fn
+from rwkv.wkv import get_wkv_fn, WkvImpl
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +117,7 @@ class Attention(nn.Module):
     init_x: Tensor
     init_state: Tensor
 
-    def __init__(self, emb_dim: int, lora_rank: int | None = None) -> None:
+    def __init__(self, emb_dim: int, lora_rank: int | None = None, wkv_fn_key: WkvImpl | None = None) -> None:
         super().__init__()
 
         self.time_decay = nn.Parameter(torch.empty(emb_dim))
@@ -132,7 +132,7 @@ class Attention(nn.Module):
         self.receptance = maybe_lora(nn.Linear(emb_dim, emb_dim, bias=False), lora_rank)
         self.output = maybe_lora(nn.Linear(emb_dim, emb_dim, bias=False), lora_rank)
 
-        wkv_fn, init_state = get_wkv_fn(emb_dim, "log")
+        wkv_fn, init_state = get_wkv_fn(emb_dim, wkv_fn_key)
 
         self.register_buffer("init_x", torch.zeros(1, 1, emb_dim), persistent=False)
         self.register_buffer("init_state", init_state, persistent=False)

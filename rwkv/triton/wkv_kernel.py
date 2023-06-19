@@ -7,6 +7,7 @@ faster while using less memory. It requires that ``triton`` is installed, which
 in turn requires a ``triton``-compatible GPU and CUDA version.
 """
 
+import torch
 import triton
 import triton.language as tl
 from torch import Tensor
@@ -389,3 +390,7 @@ class _WKV(Function):
 
 def triton_wkv(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tensor) -> tuple[Tensor, Tensor]:
     return _WKV.apply(w, u, k, v, state)
+
+
+def initial_state_triton(emb_dim: int) -> Tensor:
+    return torch.zeros(1, 1, emb_dim, dtype=torch.float32, device="cuda")

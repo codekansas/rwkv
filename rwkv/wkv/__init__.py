@@ -1,3 +1,5 @@
+# mypy: disable-error-code="import"
+# ruff: noqa: ANN001, ANN201, ANN202, N803, N806
 """Implements the WKV part of the RWKV model.
 
 This provides a few different implementations of the WKV algorithm, which
@@ -17,7 +19,7 @@ from .vanilla import initial_state_vanilla, wkv_vanilla
 
 logger = logging.getLogger(__name__)
 
-WkvImpl = Literal["vanilla", "eps", "log"]
+WkvImpl = Literal["triton", "vanilla", "eps", "log"]
 
 # The WKV function takes the arguments (w, u, k, v, state) and returns the
 # tuple (wkv, state). The state should be a single tensor.
@@ -30,7 +32,7 @@ def supports_triton() -> bool:
     return torch.cuda.is_available()
 
 
-def get_wkv_fn(emb_dim: int, impl: WkvImpl = "log") -> tuple[WkvFn, WkvInitState]:
+def get_wkv_fn(emb_dim: int, impl: WkvImpl | None = None) -> tuple[WkvFn, WkvInitState]:
     """Returns the WKV function to use and the hidden state.
 
     The function takes the
@@ -42,6 +44,19 @@ def get_wkv_fn(emb_dim: int, impl: WkvImpl = "log") -> tuple[WkvFn, WkvInitState
     Returns:
         The WKV function to use.
     """
+    if impl is None or impl == "triton":
+        try:
+            from rwkv.triton.wkv_kernel import triton_wkv, initial_state_triton
+
+            return triton_wkv, initial_state_triton(emb_dim)
+
+        except ImportError:
+            if impl is None:
+                logger.warning("Triton is not available, falling back to vanilla implementation.")
+                impl = "vanilla"
+            else:
+                raise
+
     match impl:
         case "vanilla":
             return wkv_vanilla, initial_state_vanilla(emb_dim)
