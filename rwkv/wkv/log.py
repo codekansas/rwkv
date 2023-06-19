@@ -109,14 +109,15 @@ def wkv_log_space_backward(
 
         ln_alpha_p_prev, ln_alpha_m_prev, ln_beta_prev = state[:, :, t].chunk(3, dim=1)
 
-        wkv_p = torch.exp(logaddexp(u + kt + ln_v_p, ln_alpha_p_prev) - logaddexp(u + kt, ln_beta_prev))
-        wkv_m = torch.exp(logaddexp(u + kt + ln_v_m, ln_alpha_m_prev) - logaddexp(u + kt, ln_beta_prev))
-
-        grad_ln_wkv_p = grad_wkv[:, t : t + 1] * wkv_p
-        grad_ln_wkv_m = grad_wkv[:, t : t + 1] * -wkv_m
-
         uk = u + kt
         ukv_p, ukv_m = uk + ln_v_p, uk + ln_v_m
+
+        ukb = logaddexp(uk, ln_beta_prev)
+        wkv_p = torch.exp(logaddexp(ukv_p, ln_alpha_p_prev) - ukb)
+        wkv_m = torch.exp(logaddexp(ukv_m, ln_alpha_m_prev) - ukb)
+
+        grad_wkvt = grad_wkv[:, t : t + 1]
+        grad_ln_wkv_p, grad_ln_wkv_m = grad_wkvt * wkv_p, grad_wkvt * -wkv_m
 
         # Backpropagates wkv gradients.
         e_num_p = torch.exp(ln_alpha_p_prev - ukv_p)
