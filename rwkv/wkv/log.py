@@ -5,6 +5,8 @@ This implementation uses log-space state variables, verses the original
 implementation which offsets the exponents.
 """
 
+import math
+
 import torch
 from torch import Tensor
 from torch.autograd.function import Function, FunctionCtx, once_differentiable
@@ -19,6 +21,7 @@ def wkv_log_space_forward(
     v: Tensor,
     state: Tensor,
     eps: float = EPS,
+    normalize: bool = False,
 ) -> tuple[Tensor, Tensor]:
     bsz, tsz, chans = k.shape
 
@@ -28,7 +31,7 @@ def wkv_log_space_forward(
 
     ln_alpha_p, ln_alpha_m, ln_beta = state[:, :, -1].chunk(3, dim=1)
 
-    # log_eps = math.log(eps)
+    log_eps = math.log(eps)
 
     wkvs = []
     ln_alpha_ps = [ln_alpha_p]
@@ -39,18 +42,19 @@ def wkv_log_space_forward(
         max_av = torch.maximum(a, b)
         return max_av + torch.log(torch.exp(a - max_av) + torch.exp(b - max_av))
 
-    # def logsubexp(a: Tensor, b: Tensor) -> Tensor:
-    #     max_av = torch.maximum(torch.maximum(a, b), torch.full_like(a, log_eps))
-    #     return max_av + torch.log(torch.exp(a - max_av) - torch.exp(b - max_av))
+    def logsubexp(a: Tensor, b: Tensor) -> Tensor:
+        max_av = torch.maximum(torch.maximum(a, b), torch.full_like(a, log_eps))
+        return max_av + torch.log(torch.exp(a - max_av) - torch.exp(b - max_av))
 
     for t in range(tsz):
         kt, vt = k[:, t : t + 1], v[:, t : t + 1]
         vt_p, vt_m = torch.clamp_min(vt, 0) + eps, torch.clamp_min(-vt, 0) + eps
         ln_v_p, ln_v_m = torch.log(vt_p), torch.log(vt_m)
 
-        # ln_alpha_pn = torch.minimum(ln_alpha_p, ln_alpha_m) - eps
-        # ln_alpha_p = logsubexp(ln_alpha_p, ln_alpha_pn)
-        # ln_alpha_m = logsubexp(ln_alpha_m, ln_alpha_pn)
+        if normalize:
+            ln_alpha_pm = torch.minimum(ln_alpha_p, ln_alpha_m) - eps
+            ln_alpha_p = logsubexp(ln_alpha_p, ln_alpha_pm)
+            ln_alpha_m = logsubexp(ln_alpha_m, ln_alpha_pm)
 
         ln_wkv_p = logaddexp(u + kt + ln_v_p, ln_alpha_p) - logaddexp(u + kt, ln_beta)
         ln_wkv_m = logaddexp(u + kt + ln_v_m, ln_alpha_m) - logaddexp(u + kt, ln_beta)

@@ -49,10 +49,6 @@ def test_log_wkv() -> None:
 @pytest.mark.parametrize("mode", ["state", "wkv", "both"])
 def test_log_wkv_gradients(mode: str) -> None:
     bsz, tsz, chans = 2, 7, 16
-
-    torch.manual_seed(1337)
-    tsz = 5  # TODO: Remove after testing
-
     device, dtype = torch.device("cpu"), torch.float64
 
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
@@ -73,7 +69,6 @@ def test_log_wkv_gradients(mode: str) -> None:
     wkv_ref, state_out_ref = wkv_log_space_forward(wt, ut, kt, vt, statet)
     state_out_ref = state_out_ref[:, :, -1:]
     wkv_grad, state_out_grad = torch.rand_like(wkv_ref), torch.rand_like(state_out_ref)
-    # wkv_grad, state_out_grad = torch.ones_like(wkv_ref), torch.ones_like(state_out_ref)
     backprop(wkv_ref, state_out_ref, wkv_grad, state_out_grad)
     wgr, ugr, kgr, vgr, stategr = _get_grads(wt, ut, kt, vt, statet)
 

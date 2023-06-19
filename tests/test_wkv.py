@@ -31,3 +31,8 @@ def test_wkv_matches(impls: tuple[WkvImpl, WkvImpl]) -> None:
     wkv_b, _ = wkv_fn_b(w, u, k, v, state_b)
 
     assert torch.allclose(wkv_a, wkv_b)
+
+
+if __name__ == "__main__":
+    # python -m tests.test_wkv
+    test_wkv_matches(("vanilla", "log"))
