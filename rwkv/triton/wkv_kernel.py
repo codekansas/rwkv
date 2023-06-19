@@ -190,7 +190,7 @@ def _forward_2(
     out = k.new_empty(bsz, tsz, chans)
     alpha_out = k.new_empty(bsz, 1, chans)
     beta_out = k.new_empty(bsz, 1, chans)
-    eps_out: k.new_empty(bsz, 1, chans)
+    eps_out = k.new_empty(bsz, 1, chans)
 
     _forward_kernel_2[(bsz, chans)](
         w,
