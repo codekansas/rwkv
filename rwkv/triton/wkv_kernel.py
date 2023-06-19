@@ -194,7 +194,7 @@ def _backward(
     galpha_out: Tensor,
     gbeta_out: Tensor,
     geps_out: Tensor,
-) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     bsz, tsz, chans = k.shape
 
     # New tensors to output.
@@ -230,7 +230,7 @@ def _backward(
         geps,
     )
 
-    return gw, gu, gk, gv, galpha, gbeta
+    return gw, gu, gk, gv, galpha, gbeta, geps
 
 
 class _WKV(Function):
