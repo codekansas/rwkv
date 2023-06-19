@@ -9,6 +9,7 @@ from torch import Tensor
 from torch.autograd.function import Function, FunctionCtx, once_differentiable
 
 
+@torch.jit.script
 def wkv_with_eps_forward(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tensor) -> tuple[Tensor, Tensor]:
     bsz, tsz, chans = k.shape
 
@@ -52,6 +53,7 @@ def wkv_with_eps_forward(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tens
     return torch.cat(wkvs, 1), torch.cat((alpha, beta, eps), dim=1)
 
 
+@torch.jit.script
 def wkv_with_eps_backward(
     w: Tensor,
     u: Tensor,
@@ -78,7 +80,7 @@ def wkv_with_eps_backward(
     grad_k = torch.zeros_like(k)
     grad_v = torch.zeros_like(v)
 
-    for t in reversed(range(tsz)):
+    for t in range(tsz - 1, -1, -1):
         kt, vt = k[:, t : t + 1], v[:, t : t + 1]
         alpha_prev, beta_prev, eps_prev = alpha[:, :, t], beta[:, :, t], eps[:, :, t]
         alpha_curr, beta_curr, eps_curr = alpha[:, :, t + 1], beta[:, :, t + 1], eps[:, :, t + 1]

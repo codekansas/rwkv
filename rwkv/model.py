@@ -117,7 +117,7 @@ class Attention(nn.Module):
     init_x: Tensor
     init_state: Tensor
 
-    def __init__(self, emb_dim: int, lora_rank: int | None = None, wkv_fn_key: WkvImpl | None = None) -> None:
+    def __init__(self, emb_dim: int, lora_rank: int | None = None, wkv_impl: WkvImpl | None = None) -> None:
         super().__init__()
 
         self.time_decay = nn.Parameter(torch.empty(emb_dim))
@@ -132,7 +132,7 @@ class Attention(nn.Module):
         self.receptance = maybe_lora(nn.Linear(emb_dim, emb_dim, bias=False), lora_rank)
         self.output = maybe_lora(nn.Linear(emb_dim, emb_dim, bias=False), lora_rank)
 
-        wkv_fn, init_state = get_wkv_fn(emb_dim, wkv_fn_key)
+        wkv_fn, init_state = get_wkv_fn(emb_dim, wkv_impl)
 
         self.register_buffer("init_x", torch.zeros(1, 1, emb_dim), persistent=False)
         self.register_buffer("init_state", init_state, persistent=False)
@@ -202,14 +202,20 @@ class FeedForward(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, emb_dim: int, pre_norm: bool, lora_rank: int | None = None) -> None:
+    def __init__(
+        self,
+        emb_dim: int,
+        pre_norm: bool,
+        lora_rank: int | None = None,
+        wkv_impl: WkvImpl | None = None,
+    ) -> None:
         super().__init__()
 
         self.ln0 = nn.LayerNorm(emb_dim) if pre_norm else None
         self.ln1 = nn.LayerNorm(emb_dim)
         self.ln2 = nn.LayerNorm(emb_dim)
 
-        self.att = Attention(emb_dim, lora_rank=lora_rank)
+        self.att = Attention(emb_dim, lora_rank=lora_rank, wkv_impl=wkv_impl)
         self.ffn = FeedForward(emb_dim, emb_dim * 4, lora_rank=lora_rank)
 
     def forward(self, x: Tensor, state: State | None = None) -> tuple[Tensor, State]:
@@ -223,11 +229,19 @@ class Block(nn.Module):
 
 
 class Rwkv(nn.Module):
-    def __init__(self, emb_dim: int, num_tokens: int, num_layers: int, lora_rank: int | None = None) -> None:
+    def __init__(
+        self,
+        emb_dim: int,
+        num_tokens: int,
+        num_layers: int,
+        lora_rank: int | None = None,
+        wkv_impl: WkvImpl | None = None,
+    ) -> None:
         super().__init__()
 
         self.emb = maybe_lora(nn.Embedding(num_tokens, emb_dim), lora_rank)
-        self.blocks = nn.ModuleList([Block(emb_dim, i == 0, lora_rank=lora_rank) for i in range(num_layers)])
+        blocks = [Block(emb_dim, i == 0, lora_rank=lora_rank, wkv_impl=wkv_impl) for i in range(num_layers)]
+        self.blocks = nn.ModuleList(blocks)
         self.ln_out = nn.LayerNorm(emb_dim)
         self.head = maybe_lora(nn.Linear(emb_dim, num_tokens, bias=False), lora_rank)
 
@@ -333,12 +347,13 @@ def pretrained_rwkv(
     device: BaseDevice | None = None,
     lora_rank: int | None = None,
     empty: bool = False,
+    wkv_impl: WkvImpl | None = None,
 ) -> Rwkv:
     device = AutoDevice.detect_device() if device is None else device
     model_args = PRETRAINED_MODEL_SIZES[key]
 
     with Timer("building model skeleton", spinner=True), init_empty_weights():
-        model = Rwkv(model_args.emb_dim, 50277, model_args.num_layers, lora_rank=lora_rank)
+        model = Rwkv(model_args.emb_dim, 50277, model_args.num_layers, lora_rank=lora_rank, wkv_impl=wkv_impl)
 
     if empty:
         model._apply(meta_to_empty_func(device.get_device(), torch.half))
