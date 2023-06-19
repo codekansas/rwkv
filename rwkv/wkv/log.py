@@ -118,11 +118,6 @@ def wkv_log_space_backward(
         uk = u + kt
         ukv_p, ukv_m = uk + ln_v_p, uk + ln_v_m
 
-        # grad_u fine
-        # grad_v fine
-
-        # =========
-
         # Backpropagates wkv gradients.
         e_num_p = torch.exp(ln_alpha_p_prev - ukv_p)  # okay
         e_num_m = torch.exp(ln_alpha_m_prev - ukv_m)  # okay
@@ -136,11 +131,7 @@ def wkv_log_space_backward(
 
         grad_ln_alpha_wkv_p = grad_ln_wkv_p / (1 + (1 / e_num_p))
         grad_ln_alpha_wkv_m = grad_ln_wkv_m / (1 + (1 / e_num_m))
-        grad_ln_beta_wkv = grad_ln_wkv_p / (1 + (1 / e_den)) + grad_ln_wkv_m / (1 + (1 / e_den))
-
-        # ========= fine
-
-        ###### THIS PART OKAY FOR W
+        grad_ln_beta_wkv = -grad_ln_wkv_p / (1 + (1 / e_den)) - grad_ln_wkv_m / (1 + (1 / e_den))
 
         # Backpropagates alpha gradients.
         e_alpha_p = torch.exp(kt + ln_v_p - (w + ln_alpha_p_prev))
@@ -150,15 +141,13 @@ def wkv_log_space_backward(
         grad_w += (grad_wa_p + grad_wa_m).flatten(0, -2).sum(0)
         grad_kv_p, grad_kv_m = grad_ln_alpha_p / (1 + (1 / e_alpha_p)), grad_ln_alpha_m / (1 + (1 / e_alpha_m))  # okay
         grad_k[:, t : t + 1] += grad_kv_p + grad_kv_m
-        grad_v[:, t : t + 1] += torch.where(vt > 0, grad_kv_p / vt_p, -grad_kv_m / vt_m)
+        grad_v[:, t : t + 1] += torch.where(vt > 0, grad_kv_p / vt_p, -grad_kv_m / vt_m)  # okay
 
         # Backpropagates beta gradients.
-        e_beta = torch.exp(kt - (w + ln_beta_prev))
+        e_beta = torch.exp(kt - (w + ln_beta_prev))  # okay
         grad_wb = grad_ln_beta / (1 + e_beta)  # okay
         grad_w += grad_wb.flatten(0, -2).sum(0)  # okay
         grad_k[:, t : t + 1] += grad_ln_beta / (1 + (1 / e_beta))  # okay
-
-        ######
 
         # Compute gradients for log alpha and log beta.
         grad_ln_alpha_p = grad_wa_p + grad_ln_alpha_wkv_p
