@@ -14,6 +14,20 @@ from torch.autograd.function import Function, FunctionCtx, once_differentiable
 EPS = 1e-9
 
 
+@torch.jit.script
+def logaddexp(a: Tensor, b: Tensor) -> Tensor:
+    # max_av = torch.maximum(a, b)
+    # return max_av + torch.log(torch.exp(a - max_av) + torch.exp(b - max_av))
+    return torch.logaddexp(a, b)
+
+
+@torch.jit.script
+def logsubexp(a: Tensor, b: Tensor, log_eps: float) -> Tensor:
+    max_av = torch.maximum(torch.maximum(a, b), torch.full_like(a, log_eps))
+    return max_av + torch.log(torch.exp(a - max_av) - torch.exp(b - max_av))
+
+
+@torch.jit.script
 def wkv_log_space_forward(
     w: Tensor,
     u: Tensor,
@@ -38,14 +52,6 @@ def wkv_log_space_forward(
     ln_alpha_ms = [ln_alpha_m]
     ln_betas = [ln_beta]
 
-    def logaddexp(a: Tensor, b: Tensor) -> Tensor:
-        max_av = torch.maximum(a, b)
-        return max_av + torch.log(torch.exp(a - max_av) + torch.exp(b - max_av))
-
-    def logsubexp(a: Tensor, b: Tensor) -> Tensor:
-        max_av = torch.maximum(torch.maximum(a, b), torch.full_like(a, log_eps))
-        return max_av + torch.log(torch.exp(a - max_av) - torch.exp(b - max_av))
-
     for t in range(tsz):
         kt, vt = k[:, t : t + 1], v[:, t : t + 1]
         vt_p, vt_m = torch.clamp_min(vt, 0) + eps, torch.clamp_min(-vt, 0) + eps
@@ -53,8 +59,8 @@ def wkv_log_space_forward(
 
         if normalize:
             ln_alpha_pm = torch.minimum(ln_alpha_p, ln_alpha_m) - eps
-            ln_alpha_p = logsubexp(ln_alpha_p, ln_alpha_pm)
-            ln_alpha_m = logsubexp(ln_alpha_m, ln_alpha_pm)
+            ln_alpha_p = logsubexp(ln_alpha_p, ln_alpha_pm, log_eps)
+            ln_alpha_m = logsubexp(ln_alpha_m, ln_alpha_pm, log_eps)
 
         ln_wkv_p = logaddexp(u + kt + ln_v_p, ln_alpha_p) - logaddexp(u + kt, ln_beta)
         ln_wkv_m = logaddexp(u + kt + ln_v_m, ln_alpha_m) - logaddexp(u + kt, ln_beta)
@@ -77,6 +83,7 @@ def wkv_log_space_forward(
     return torch.cat(wkvs, 1), torch.cat((ln_alpha_p, ln_alpha_m, ln_beta), dim=1)
 
 
+@torch.jit.script
 def wkv_log_space_backward(
     w: Tensor,
     u: Tensor,
@@ -102,11 +109,7 @@ def wkv_log_space_backward(
     grad_k = torch.zeros_like(k)
     grad_v = torch.zeros_like(v)
 
-    def logaddexp(a: Tensor, b: Tensor) -> Tensor:
-        max_av = torch.maximum(a, b)
-        return max_av + torch.log(torch.exp(a - max_av) + torch.exp(b - max_av))
-
-    for t in reversed(range(tsz)):
+    for t in range(tsz - 1, -1, -1):
         kt, vt = k[:, t : t + 1], v[:, t : t + 1]
         vt_p, vt_m = torch.clamp_min(vt, 0) + eps, torch.clamp_min(-vt, 0) + eps
         ln_v_p, ln_v_m = torch.log(vt_p), torch.log(vt_m)

@@ -6,6 +6,7 @@ is used to compute the output of the model.
 
 import functools
 import logging
+import warnings
 from typing import Callable, Literal
 
 import torch
@@ -50,7 +51,7 @@ def get_wkv_fn(emb_dim: int, impl: WkvImpl | None = None) -> tuple[WkvFn, WkvIni
 
         except ImportError:
             if impl is None:
-                logger.warning("Triton is not available, falling back to vanilla implementation.")
+                warnings.warn("Triton is not available, falling back to vanilla implementation.")
                 impl = "vanilla"
             else:
                 raise
