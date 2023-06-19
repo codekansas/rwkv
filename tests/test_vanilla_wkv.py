@@ -53,7 +53,7 @@ def test_vanilla_wkv() -> None:
 @pytest.mark.parametrize("mode", ["state", "wkv", "both"])
 def test_vanilla_wkv_gradients(mode: str) -> None:
     bsz, tsz, chans = 2, 7, 16
-    device, dtype = torch.device("cpu"), torch.float32
+    device, dtype = torch.device("cpu"), torch.float64
 
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
     state = initial_state_vanilla(chans).repeat_interleave(bsz, dim=0).to(device, dtype)
@@ -84,3 +84,8 @@ def test_vanilla_wkv_gradients(mode: str) -> None:
     for gr, gm in zip((wgr, ugr, kgr, vgr, stategr), (wgm, ugm, kgm, vgm, stategm)):
         if gr is not None and gm is not None:
             assert torch.allclose(gr, gm)
+
+
+if __name__ == "__main__":
+    # python -m tests.test_vanilla_wkv
+    test_vanilla_wkv_gradients("wkv")

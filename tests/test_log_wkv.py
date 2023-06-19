@@ -73,8 +73,8 @@ def test_log_wkv_gradients(mode: str) -> None:
     wt, ut, kt, vt, statet = _copy_with_grad(w, u, k, v, state)
     wkv_ref, state_out_ref = wkv_log_space_forward(wt, ut, kt, vt, statet)
     state_out_ref = state_out_ref[:, :, -1:]
-    # wkv_grad, state_out_grad = torch.rand_like(wkv_ref), torch.rand_like(state_out_ref)
-    wkv_grad, state_out_grad = torch.ones_like(wkv_ref), torch.ones_like(state_out_ref)
+    wkv_grad, state_out_grad = torch.rand_like(wkv_ref), torch.rand_like(state_out_ref)
+    # wkv_grad, state_out_grad = torch.ones_like(wkv_ref), torch.ones_like(state_out_ref)
     backprop(wkv_ref, state_out_ref, wkv_grad, state_out_grad)
     wgr, ugr, kgr, vgr, stategr = _get_grads(wt, ut, kt, vt, statet)
 
@@ -89,3 +89,8 @@ def test_log_wkv_gradients(mode: str) -> None:
     for gr, gm in zip((wgr, ugr, kgr, vgr, stategr), (wgm, ugm, kgm, vgm, stategm)):
         if gr is not None and gm is not None:
             assert torch.allclose(gr, gm)
+
+
+if __name__ == "__main__":
+    # python -m tests.test_log_wkv
+    test_log_wkv_gradients("wkv")

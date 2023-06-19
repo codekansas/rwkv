@@ -45,7 +45,7 @@ def wkv_log_space_forward(
 
     for t in range(tsz):
         kt, vt = k[:, t : t + 1], v[:, t : t + 1]
-        vt_p, vt_m = torch.clamp(vt, min=0) + eps, torch.clamp(-vt, min=0) + eps
+        vt_p, vt_m = torch.clamp_min(vt, 0) + eps, torch.clamp_min(-vt, 0) + eps
         ln_v_p, ln_v_m = torch.log(vt_p), torch.log(vt_m)
 
         # ln_alpha_pn = torch.minimum(ln_alpha_p, ln_alpha_m) - eps
@@ -78,7 +78,6 @@ def wkv_log_space_backward(
     u: Tensor,
     k: Tensor,
     v: Tensor,
-    wkv: Tensor,
     state: Tensor,
     grad_wkv: Tensor,
     grad_state: Tensor,
@@ -99,17 +98,22 @@ def wkv_log_space_backward(
     grad_k = torch.zeros_like(k)
     grad_v = torch.zeros_like(v)
 
+    def logaddexp(a: Tensor, b: Tensor) -> Tensor:
+        max_av = torch.maximum(a, b)
+        return max_av + torch.log(torch.exp(a - max_av) + torch.exp(b - max_av))
+
     for t in reversed(range(tsz)):
         kt, vt = k[:, t : t + 1], v[:, t : t + 1]
-        vt_p, vt_m = torch.clamp(vt, min=0) + eps, torch.clamp(-vt, min=0) + eps
+        vt_p, vt_m = torch.clamp_min(vt, 0) + eps, torch.clamp_min(-vt, 0) + eps
         ln_v_p, ln_v_m = torch.log(vt_p), torch.log(vt_m)
 
         ln_alpha_p_prev, ln_alpha_m_prev, ln_beta_prev = state[:, :, t].chunk(3, dim=1)
 
-        grad_ln_wkv_p = grad_wkv[:, t : t + 1] * torch.clamp_min(wkv[:, t : t + 1], min=0)
-        grad_ln_wkv_m = grad_wkv[:, t : t + 1] * -torch.clamp_min(-wkv[:, t : t + 1], min=0)
+        wkv_p = torch.exp(logaddexp(u + kt + ln_v_p, ln_alpha_p_prev) - logaddexp(u + kt, ln_beta_prev))
+        wkv_m = torch.exp(logaddexp(u + kt + ln_v_m, ln_alpha_m_prev) - logaddexp(u + kt, ln_beta_prev))
 
-        # breakpoint()
+        grad_ln_wkv_p = grad_wkv[:, t : t + 1] * wkv_p
+        grad_ln_wkv_m = grad_wkv[:, t : t + 1] * -wkv_m
 
         uk = u + kt
         ukv_p, ukv_m = uk + ln_v_p, uk + ln_v_m
@@ -123,7 +127,7 @@ def wkv_log_space_backward(
         grad_uk = grad_kv_p + grad_kv_m - grad_wkv_den_p - grad_wkv_den_m
         grad_u += grad_uk.flatten(0, -2).sum(0)
         grad_k[:, t : t + 1] += grad_uk
-        grad_v[:, t : t + 1] += torch.where(vt > 0, grad_kv_p / vt_p, -grad_kv_m / vt_m)
+        grad_v[:, t : t + 1] += torch.where(vt > 0, grad_kv_p / vt_p, grad_kv_m / -vt_m)
 
         grad_ln_alpha_wkv_p = grad_ln_wkv_p / (1 + (1 / e_num_p))
         grad_ln_alpha_wkv_m = grad_ln_wkv_m / (1 + (1 / e_num_m))
@@ -142,7 +146,7 @@ def wkv_log_space_backward(
         grad_v[:, t : t + 1] += torch.where(vt > 0, grad_kv_p / vt_p, -grad_kv_m / vt_m)
 
         # Backpropagates beta gradients.
-        e_beta = torch.exp(kt - w - ln_beta_prev)
+        e_beta = torch.exp(kt - (w + ln_beta_prev))
         grad_wb = grad_ln_beta / (1 + e_beta)
         grad_w += grad_wb.flatten(0, -2).sum(0)
         grad_k[:, t : t + 1] += grad_ln_beta / (1 + (1 / e_beta))
@@ -168,7 +172,7 @@ class WkvLogSpace(Function):
         state: Tensor,
     ) -> tuple[Tensor, Tensor]:
         wkv, state_out = wkv_log_space_forward(w, u, k, v, state)
-        ctx.save_for_backward(w, u, k, v, wkv, state_out)
+        ctx.save_for_backward(w, u, k, v, state_out)
         return wkv, state_out[:, :, -1:]
 
     @staticmethod
@@ -178,8 +182,8 @@ class WkvLogSpace(Function):
         grad_wkv: Tensor,
         grad_state: Tensor,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-        w, u, k, v, wkv, state = ctx.saved_tensors
-        return wkv_log_space_backward(w, u, k, v, wkv, state, grad_wkv, grad_state)
+        w, u, k, v, state = ctx.saved_tensors
+        return wkv_log_space_backward(w, u, k, v, state, grad_wkv, grad_state)
 
 
 def initial_state_log_space(emb_dim: int) -> Tensor:
