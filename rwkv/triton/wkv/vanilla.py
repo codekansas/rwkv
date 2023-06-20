@@ -1,6 +1,6 @@
 # mypy: disable-error-code="import, no-untyped-def, override"
 # ruff: noqa: ANN001, ANN201, ANN202, N803, N806
-"""Defines a Triton kernel for the RWKV forward and backward passes.
+"""Defines Triton kernels for the vanilla RWKV forward and backward passes.
 
 This kernel is used to make the WKV computation in the attention layer run
 faster while using less memory. It requires that ``triton`` is installed, which
@@ -15,20 +15,18 @@ from torch.autograd.function import Function, FunctionCtx, once_differentiable
 
 
 @triton.jit
-def _forward_kernel(
+def wkv_triton_vanilla_forward_kernel(
     w_ptr,
     u_ptr,
     k_ptr,
     v_ptr,
     alpha_ptr,
     beta_ptr,
-    eps_ptr,
     chans,
     tsz,
     out_ptr,
     alpha_out_ptr,
     beta_out_ptr,
-    eps_out_ptr,
 ):
     # Parallelize over the batch and channel dimensions.
     b_idx = tl.program_id(0)
@@ -46,13 +44,13 @@ def _forward_kernel(
 
     # Pointers to the batch (and possibly channel) for the output tensors.
     out_ptr = out_ptr + b_idx * chans_tsz + c_idx
-    alpha_out_ptr = alpha_out_ptr + b_idx * chans + c_idx
-    beta_out_ptr = beta_out_ptr + b_idx * chans + c_idx
+    alpha_out_ptr = alpha_out_ptr + b_idx * chans_tsz + c_idx
+    beta_out_ptr = beta_out_ptr + b_idx * chans_tsz + c_idx
 
     # Loads parameters.
     alpha = tl.load(alpha_ptr).to(tl.float32)
     beta = tl.load(beta_ptr).to(tl.float32)
-    w = -tl.exp(tl.load(w_ptr).to(tl.float32))
+    w = tl.load(w_ptr).to(tl.float32)
     u = tl.load(u_ptr).to(tl.float32)
 
     ew = tl.exp(w)
@@ -65,55 +63,54 @@ def _forward_kernel(
 
         euk = tl.exp(u + kt)
 
-        out = (alpha + euk * vt) / (beta + euk)
-        tl.store(out_ptr + tc, out)
+        wkv = (alpha + euk * vt) / (beta + euk)
+        tl.store(out_ptr + tc, wkv)
 
         ek = tl.exp(kt)
         alpha = ew * alpha + ek * vt
         beta = ew * beta + ek
 
-    tl.store(alpha_out_ptr, alpha)
-    tl.store(beta_out_ptr, beta)
+        tl.store(alpha_out_ptr + tc, alpha)
+        tl.store(beta_out_ptr + tc, beta)
 
 
-def _forward(
+def wkv_triton_vanilla_forward(
     w: Tensor,
     u: Tensor,
     k: Tensor,
     v: Tensor,
-    alpha: Tensor,
-    beta: Tensor,
-    eps: Tensor,
-) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    state: Tensor,
+) -> tuple[Tensor, Tensor]:
     bsz, tsz, chans = k.shape
 
-    # New tensors to output.
-    out = k.new_empty(bsz, tsz, chans)
-    alpha_out = k.new_empty(bsz, 1, chans)
-    beta_out = k.new_empty(bsz, 1, chans)
-    eps_out = k.new_empty(bsz, 1, chans)
+    alpha, beta = state[:, :, -1].chunk(2, dim=1)  # (B, 1, D), (B, 1, D)
 
-    _forward_kernel[(bsz, chans)](
+    # New tensors to output.
+    wkvs = k.new_empty(bsz, tsz, chans)
+    alpha_out = k.new_empty(bsz, tsz, chans)
+    beta_out = k.new_empty(bsz, tsz, chans)
+
+    wkv_triton_vanilla_forward_kernel[(bsz, chans)](
         w,
         u,
         k,
         v,
         alpha,
         beta,
-        eps,
         chans,
         tsz,
-        out,
+        wkvs,
         alpha_out,
         beta_out,
-        eps_out,
     )
 
-    return out, alpha_out, beta_out, eps_out
+    state_out = torch.stack([torch.cat([alpha, alpha_out], dim=1), torch.cat([beta, beta_out], dim=1)], dim=1)
+
+    return wkvs, state_out
 
 
 @triton.jit
-def _backward_kernel(
+def wkv_vanilla_triton_backward_kernel(
     w_ptr,
     u_ptr,
     k_ptr,
@@ -121,13 +118,11 @@ def _backward_kernel(
     out_ptr,
     alpha_out_ptr,
     beta_out_ptr,
-    eps_out_ptr,
     chans,
     tsz,
     gout_ptr,
     galpha_out_ptr,
     gbeta_out_ptr,
-    geps_out_ptr,
     gw_ptr,
     gu_ptr,
     gk_ptr,
@@ -181,21 +176,19 @@ def _backward_kernel(
     tl.store(gbeta_ptr, gbeta)
 
 
-def _backward(
+def wkv_triton_vanilla_backward(
     w: Tensor,
     u: Tensor,
     k: Tensor,
     v: Tensor,
-    out: Tensor,
-    alpha_out: Tensor,
-    beta_out: Tensor,
-    eps_out: Tensor,
-    gout: Tensor,
-    galpha_out: Tensor,
-    gbeta_out: Tensor,
-    geps_out: Tensor,
-) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    state: Tensor,
+    grad_wkv: Tensor,
+    grad_state: Tensor,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     bsz, tsz, chans = k.shape
+
+    alpha, beta = state.chunk(2, dim=1)  # (B, 1, T + 1, D), (B, 1, T + 1, D)
+    galpha_out, gbeta_out = grad_state[:, :, 0].chunk(2, dim=1)  # (B, 1, D), (B, 1, D)
 
     # New tensors to output.
     gw = k.new_empty(chans)
@@ -206,21 +199,18 @@ def _backward(
     gbeta = k.new_empty(bsz, 1, chans)
     geps = k.new_empty(bsz, 1, chans)
 
-    _backward_kernel[(bsz, chans)](
+    wkv_vanilla_triton_backward_kernel[(bsz, chans)](
         w,
         u,
         k,
         v,
-        out,
-        alpha_out,
-        beta_out,
-        eps_out,
+        alpha,
+        beta,
         chans,
         tsz,
-        gout,
+        grad_wkv,
         galpha_out,
         gbeta_out,
-        geps_out,
         gw,
         gu,
         gk,
@@ -230,10 +220,10 @@ def _backward(
         geps,
     )
 
-    return gw, gu, gk, gv, galpha, gbeta, geps
+    return gw, gu, gk, gv, torch.stack((galpha, gbeta), dim=1)
 
 
-class _WKV(Function):
+class WKVTritonFunction(Function):
     @staticmethod
     def forward(
         ctx: FunctionCtx,
@@ -241,10 +231,8 @@ class _WKV(Function):
         u: Tensor,
         k: Tensor,
         v: Tensor,
-        alpha: Tensor,
-        beta: Tensor,
-        eps: Tensor,
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        state: Tensor,
+    ) -> tuple[Tensor, Tensor]:
         (bsz, tsz, chans), device, dtype = k.shape, k.device, k.dtype
 
         # Performs tensor checks.
@@ -253,61 +241,29 @@ class _WKV(Function):
             assert t.stride(0) == tsz * chans
             assert t.stride(1) == chans
             assert t.size(2) == 1 or t.stride(2) == 1
-        for t in (alpha, beta):
-            assert t.shape == (bsz, 1, chans)
-            assert t.stride(0) == chans
-            assert t.stride(1) == chans
-            assert t.stride(2) == 1
+        assert state.shape == (bsz, 2, 1, chans)
+        assert state.stride(0) == chans * 2
+        assert state.stride(1) == chans
+        assert state.stride(2) == 1
         for t in (w, u):
             assert t.shape == (chans,)
             assert t.stride(0) == 1
-        for t in (v, alpha, beta, w, u):
+        for t in (v, state, w, u):
             assert t.dtype == dtype and t.device == device
 
-        out, alpha_out, beta_out, eps_out = _forward(
-            w,
-            u,
-            k,
-            v,
-            alpha,
-            beta,
-            eps,
-        )
+        wkv, state_out = wkv_triton_vanilla_forward(w, u, k, v, state)
 
-        ctx.save_for_backward(w, u, k, v, out, alpha_out, beta_out, eps_out)
+        ctx.save_for_backward(w, u, k, v, state_out)
 
-        return out, alpha_out, beta_out, eps_out
+        return wkv, state_out[:, :, -1]
 
     @staticmethod
     @once_differentiable
-    def backward(
-        ctx: FunctionCtx,
-        gout: Tensor,
-        galpha_out: Tensor,
-        gbeta_out: Tensor,
-        geps_out: Tensor,
-    ) -> tuple[Tensor, ...]:
-        w, u, k, v, out, alpha_out, beta_out, eps_out = ctx.saved_tensors
-        gw, gu, gk, gv, ga, gb, ge = _backward(
-            w,
-            u,
-            k,
-            v,
-            out,
-            alpha_out,
-            beta_out,
-            eps_out,
-            gout,
-            galpha_out,
-            gbeta_out,
-            geps_out,
-        )
-        return gw, gu, gk, gv, ga, gb, ge
+    def backward(ctx: FunctionCtx, gwkv: Tensor, gstate: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        w, u, k, v, state = ctx.saved_tensors
+        gw, gu, gk, gv, gstate = wkv_triton_vanilla_backward(w, u, k, v, state, gwkv, gstate)
+        return gw, gu, gk, gv, gstate
 
 
-def triton_wkv(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tensor) -> tuple[Tensor, Tensor]:
-    return _WKV.apply(w, u, k, v, state)
-
-
-def initial_state_triton(emb_dim: int) -> Tensor:
-    return torch.zeros(1, 1, emb_dim, dtype=torch.float32, device="cuda")
+def wkv_triton_vanilla(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tensor) -> tuple[Tensor, Tensor]:
+    return WKVTritonFunction.apply(w, u, k, v, state)

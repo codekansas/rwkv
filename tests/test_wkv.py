@@ -6,6 +6,11 @@ from torch import Tensor
 
 from rwkv.wkv import WkvImpl, get_wkv_fn
 
+IMPLS: list[tuple[WkvImpl, WkvImpl]] = [("vanilla", "log"), ("vanilla", "eps"), ("eps", "log")]
+
+if torch.cuda.is_available():
+    IMPLS.extend([("vanilla", "triton-vanilla"), ("log", "triton-log"), ("eps", "triton-eps")])
+
 
 def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dtype: torch.dtype) -> tuple[Tensor, ...]:
     w = torch.rand(chans, dtype=dtype, device=device)
@@ -15,7 +20,7 @@ def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dty
     return w, u, k, v
 
 
-@pytest.mark.parametrize("impls", [("vanilla", "log"), ("vanilla", "eps"), ("eps", "log")])
+@pytest.mark.parametrize("impls", IMPLS)
 def test_wkv_matches(impls: tuple[WkvImpl, WkvImpl]) -> None:
     bsz, tsz, chans = 2, 7, 16
     device, dtype = torch.device("cpu"), torch.float32

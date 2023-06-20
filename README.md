@@ -18,7 +18,9 @@ See the blog post linked above for more details about how each of these works.
 
 The following table shows measured tokens per second for generating a sequence on various devices using the `run.py` script.
 
-| Device     | Vanilla | Eps   | Log   |
-| ---------- | ------- | ----- | ----- |
-| M2 (Metal) | 30.87   | 26.56 | 26.99 |
-| M2 (CPU)   | 61.25   | 58.90 | 60.69 |
+| Device      | Vanilla | Eps   | Log   |
+| ----------- | ------- | ----- | ----- |
+| M2 (Metal)  | 30.87   | 26.56 | 26.99 |
+| M2 (CPU)    | 61.25   | 58.90 | 60.69 |
+| 4090 (BF16) | 101.94  | 99.28 | 93.11 |
+| 4090 (Log)  | 100.86  | 96.05 | 92.61 |
