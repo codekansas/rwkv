@@ -16,7 +16,7 @@ See the blog post linked above for more details about how each of these works.
 
 ## Speed
 
-The following table shows measured tokens per second for generating a sequence on various devices using the `run.py` script.
+The following table shows measured tokens per second for generating a sequence on various devices using the `run.py` script. Take these numbers with a heap of salt though because the inference pass is so fast that the overhead of the Python script is significant (I only observed around 15% GPU utilization on my 4090). For really fast inference, I would suggest using [this implementation](https://github.com/saharNooby/rwkv.cpp), which uses GGML.
 
 | Device      | Vanilla | Eps   | Log   |
 | ----------- | ------- | ----- | ----- |

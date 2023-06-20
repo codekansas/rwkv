@@ -35,10 +35,7 @@ def get_default_impl() -> WkvImpl:
     return "triton-log" if supports_triton() else "log"
 
 
-def get_wkv_fn(
-    emb_dim: int,
-    impl: WkvImpl | None = None,
-) -> tuple[WkvFn, WkvInitState]:
+def get_wkv_fn(emb_dim: int, impl: WkvImpl | None = None) -> tuple[WkvFn, WkvInitState]:
     """Returns the WKV function to use and the hidden state.
 
     The function takes the
@@ -64,5 +61,9 @@ def get_wkv_fn(
             from rwkv.triton.wkv.vanilla import wkv_triton_vanilla
 
             return wkv_triton_vanilla, initial_state_vanilla(emb_dim)
+        case "triton-log":
+            raise NotImplementedError
+        case "triton-eps":
+            raise NotImplementedError
         case _:
             raise ValueError(f"Unknown implementation: {impl}")
