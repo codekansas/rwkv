@@ -16,4 +16,9 @@ See the blog post linked above for more details about how each of these works.
 
 ## Speed
 
-On my M2 Macbook Pro, when running the inference script I get around 30.87 tokens per second for the vanilla WKV computation, while the log computation gets 26.99 tokens per second and the eps computation gets 26.56 tokens per second.
+The following table shows measured tokens per second for generating a sequence on various devices using the `run.py` script.
+
+| Device     | Vanilla | Eps   | Log   |
+| ---------- | ------- | ----- | ----- |
+| M2 (Metal) | 30.87   | 26.56 | 26.99 |
+| M2 (CPU)   | 61.25   | 58.90 | 60.69 |
