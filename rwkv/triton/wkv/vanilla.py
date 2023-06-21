@@ -18,62 +18,83 @@ from torch.autograd.function import Function, FunctionCtx, once_differentiable
 
 @triton.jit
 def wkv_triton_vanilla_forward_kernel(
+    # W
     w_ptr,
+    w_s_c,
+    # U
     u_ptr,
+    u_s_c,
+    # K
     k_ptr,
+    k_s_b,
+    k_s_t,
+    k_s_c,
+    # V
     v_ptr,
-    alpha_ptr,
-    beta_ptr,
+    v_s_b,
+    v_s_t,
+    v_s_c,
+    # State
+    state_ptr,
+    state_s_b,
+    state_s_ab,
+    state_s_c,
+    # WKV
+    wkv_ptr,
+    wkv_s_b,
+    wkv_s_t,
+    wkv_s_c,
+    # Output state
+    state_out_ptr,
+    state_out_s_b,
+    state_out_s_ab,
+    state_out_s_t,
+    state_out_s_c,
+    # Params
     chans,
     tsz,
-    wkv_ptr,
-    alpha_out_ptr,
-    beta_out_ptr,
+    BLOCK_SIZE_C: tl.constexpr,
 ):
-    # Parallelize over the batch and channel dimensions.
+    # Parallelize over the batch dimension.
     b_idx = tl.program_id(0)
-    c_idx = tl.program_id(1)
 
-    chans_tsz = chans * tsz
+    cs = tl.arange(0, BLOCK_SIZE_C)
+    cmask = cs < chans
 
     # Pointers to the batch (and possibly channel) for the input tensors.
-    k_ptr = k_ptr + b_idx * chans_tsz + c_idx
-    v_ptr = v_ptr + b_idx * chans_tsz + c_idx
-    alpha_ptr = alpha_ptr + b_idx * chans + c_idx
-    beta_ptr = beta_ptr + b_idx * chans + c_idx
-    w_ptr = w_ptr + c_idx
-    u_ptr = u_ptr + c_idx
+    k_ptr = k_ptr + b_idx * k_s_b
+    v_ptr = v_ptr + b_idx * v_s_b
+    alpha_ptr = state_ptr + b_idx * state_s_b
+    beta_ptr = state_ptr + b_idx * state_s_b + state_s_ab
 
     # Pointers to the batch (and possibly channel) for the output tensors.
-    wkv_ptr = wkv_ptr + b_idx * chans_tsz + c_idx
-    alpha_out_ptr = alpha_out_ptr + b_idx * chans_tsz + c_idx
-    beta_out_ptr = beta_out_ptr + b_idx * chans_tsz + c_idx
+    wkv_ptr = wkv_ptr + b_idx * wkv_s_b
+    alpha_out_ptr = state_out_ptr + b_idx * state_out_s_b
+    beta_out_ptr = state_out_ptr + b_idx * state_out_s_b + state_out_s_ab
 
     # Loads parameters.
-    alpha = tl.load(alpha_ptr)
-    beta = tl.load(beta_ptr)
-    w = tl.load(w_ptr)
-    u = tl.load(u_ptr)
+    alpha = tl.load(alpha_ptr + cs * state_s_c, mask=cmask)
+    beta = tl.load(beta_ptr + cs * state_s_c, mask=cmask)
+    w = tl.load(w_ptr + cs * w_s_c, mask=cmask)
+    u = tl.load(u_ptr + cs * u_s_c, mask=cmask)
 
     ew = tl.exp(w)
 
     for t in range(tsz):
-        tc = t * chans
-
-        kt = tl.load(k_ptr + tc)
-        vt = tl.load(v_ptr + tc)
+        kt = tl.load(k_ptr + t * k_s_t + cs * k_s_c, mask=cmask)
+        vt = tl.load(v_ptr + t * v_s_t + cs * v_s_c, mask=cmask)
 
         euk = tl.exp(u + kt)
 
         wkv = (alpha + euk * vt) / (beta + euk)
-        tl.store(wkv_ptr + tc, wkv)
+        tl.store(wkv_ptr + t * wkv_s_t + cs * wkv_s_c, wkv, mask=cmask)
 
         ek = tl.exp(kt)
         alpha = ew * alpha + ek * vt
         beta = ew * beta + ek
 
-        tl.store(alpha_out_ptr + tc, alpha)
-        tl.store(beta_out_ptr + tc, beta)
+        tl.store(alpha_out_ptr + t * state_out_s_t + cs * state_out_s_c, alpha, mask=cmask)
+        tl.store(beta_out_ptr + t * state_out_s_t + cs * state_out_s_c, beta, mask=cmask)
 
 
 def wkv_triton_vanilla_forward(
@@ -85,20 +106,13 @@ def wkv_triton_vanilla_forward(
 ) -> tuple[Tensor, Tensor]:
     (bsz, tsz, chans), device, dtype = k.shape, k.device, k.dtype
 
-    # Performs tensor checks.
-    for t in (k, v):
-        assert t.shape == (bsz, tsz, chans), f"{t.shape} != {(bsz, tsz, chans)}"
-        assert t.stride(0) == tsz * chans, f"{t.stride(0)} != {tsz * chans}"
-        assert t.stride(1) == chans, f"{t.stride(1)} != {chans}"
-        assert t.size(2) == 1 or t.stride(2) == 1, f"{t.stride(2)} != 1"
+    # Checks tensor shapes.
+    assert v.shape == (bsz, tsz, chans), f"{v.shape} != {(bsz, tsz, chans)}"
     assert state.shape == (bsz, 2, 1, chans), f"{state.shape} != {(bsz, 2, 1, chans)}"
-    assert state.stride(0) == chans * 2, f"{state.stride(0)} != {chans * 2}"
-    assert state.stride(1) == chans, f"{state.stride(1)} != {chans}"
-    assert state.stride(2) == chans, f"{state.stride(2)} != 1"
-    assert state.stride(3) == 1, f"{state.stride(3)} != 1"
-    for t in (w, u):
-        assert t.shape == (chans,), f"{t.shape} != {(chans,)}"
-        assert t.stride(0) == 1, f"{t.stride(0)} != 1"
+    assert w.shape == (chans,), f"{w.shape} != {(chans,)}"
+    assert u.shape == (chans,), f"{u.shape} != {(chans,)}"
+
+    # Checks tensor dtypes and devices.
     for t in (v, state, w, u):
         assert t.dtype == dtype and t.device == device, f"{t.dtype} != {dtype} or {t.device} != {device}"
 
@@ -107,24 +121,48 @@ def wkv_triton_vanilla_forward(
 
     # New tensors to output.
     wkvs = k.new_empty(bsz, tsz, chans)
-    alpha_out = k.new_empty(bsz, tsz, chans)
-    beta_out = k.new_empty(bsz, tsz, chans)
+    state_out = k.new_empty(bsz, 2, tsz, chans)
 
     wkv_triton_vanilla_forward_kernel[(bsz, chans)](
+        # W
         w,
+        w.stride(0),
+        # U
         u,
+        u.stride(0),
+        # K
         k,
+        k.stride(0),
+        k.stride(1),
+        k.stride(2),
+        # V
         v,
-        alpha,
-        beta,
+        v.stride(0),
+        v.stride(1),
+        v.stride(2),
+        # State
+        state,
+        state.stride(0),
+        state.stride(1),
+        state.stride(3),
+        # WKV
+        wkvs,
+        wkvs.stride(0),
+        wkvs.stride(1),
+        wkvs.stride(2),
+        # Output state
+        state_out,
+        state_out.stride(0),
+        state_out.stride(1),
+        state_out.stride(2),
+        state_out.stride(3),
+        # Params
         chans,
         tsz,
-        wkvs,
-        alpha_out,
-        beta_out,
+        BLOCK_SIZE_C=min(triton.next_power_of_2(chans), 32),
     )
 
-    state_out = torch.stack([torch.cat([alpha, alpha_out], dim=1), torch.cat([beta, beta_out], dim=1)], dim=1)
+    state_out = torch.cat((state, state_out), dim=2)
 
     return wkvs, state_out
 
@@ -186,59 +224,59 @@ def wkv_vanilla_triton_backward_kernel(
     gstate_s_c,
     # Params
     tsz,
+    chans,
+    BLOCK_SIZE_C: tl.constexpr,
 ):
-    # Parallelize over the batch and channel dimensions.
+    # Parallelize over the batch dimension.
     b_idx = tl.program_id(0)
-    c_idx = tl.program_id(1)
+
+    cs = tl.arange(0, BLOCK_SIZE_C)
+    cmask = cs < chans
 
     # Pointers to the batch (and possibly channel) for the input tensors.
-    k_ptr = k_ptr + b_idx * k_s_b + c_idx * k_s_c
-    v_ptr = v_ptr + b_idx * v_s_b + c_idx * v_s_c
-    alpha_ptr = state_ptr + b_idx * state_s_b + c_idx * state_s_c
-    beta_ptr = state_ptr + b_idx * state_s_b + state_s_ab + c_idx * state_s_c
-    w_ptr = w_ptr + c_idx * w_s_c
-    u_ptr = u_ptr + c_idx * u_s_c
+    k_ptr = k_ptr + b_idx * k_s_b
+    v_ptr = v_ptr + b_idx * v_s_b
+    alpha_ptr = state_ptr + b_idx * state_s_b
+    beta_ptr = state_ptr + b_idx * state_s_b + state_s_ab
 
     # Pointers to the batch (and possibly channel) for the output tensors.
-    gw_ptr = gw_ptr + c_idx * gw_s_c
-    gu_ptr = gu_ptr + c_idx * gu_s_c
-    gk_ptr = gk_ptr + b_idx * gk_s_b + c_idx * gk_s_c
-    gv_ptr = gv_ptr + b_idx * gv_s_b + c_idx * gv_s_c
+    gk_ptr = gk_ptr + b_idx * gk_s_b
+    gv_ptr = gv_ptr + b_idx * gv_s_b
 
     # Pointers to gradients which were recieved by the function.
-    gwkv_ptr = gwkv_ptr + b_idx * gwkv_s_b + c_idx * gwkv_s_c
-    galpha_out_ptr = gstate_out_ptr + b_idx * gstate_out_s_b + c_idx * gstate_out_s_c
-    gbeta_out_ptr = gstate_out_ptr + b_idx * gstate_out_s_b + gstate_out_s_ab + c_idx * gstate_out_s_c
+    gwkv_ptr = gwkv_ptr + b_idx * gwkv_s_b
+    galpha_out_ptr = gstate_out_ptr + b_idx * gstate_out_s_b
+    gbeta_out_ptr = gstate_out_ptr + b_idx * gstate_out_s_b + gstate_out_s_ab
 
     # Loads parameters.
-    galpha = tl.load(galpha_out_ptr)
-    gbeta = tl.load(gbeta_out_ptr)
-    w = tl.load(w_ptr)
-    u = tl.load(u_ptr)
+    galpha = tl.load(galpha_out_ptr + gstate_out_s_c * cs, mask=cmask)
+    gbeta = tl.load(gbeta_out_ptr + gstate_out_s_c * cs, mask=cmask)
+    w = tl.load(w_ptr + w_s_c * cs, mask=cmask)
+    u = tl.load(u_ptr + u_s_c * cs, mask=cmask)
 
     ew = tl.exp(w)
 
     # Gradient accumulators.
-    gw = 0.0
-    gu = 0.0
+    gw = tl.zeros_like(w)
+    gu = tl.zeros_like(u)
 
     for t in range(tsz):
         tc = tsz - t - 1
 
-        kt = tl.load(k_ptr + tc * k_s_t)
-        vt = tl.load(v_ptr + tc * v_s_t)
-        alpha_prev = tl.load(alpha_ptr + tc * state_s_t)
-        beta_prev = tl.load(beta_ptr + tc * state_s_t)
+        kt = tl.load(k_ptr + tc * k_s_t + k_s_c * cs, mask=cmask)
+        vt = tl.load(v_ptr + tc * v_s_t + v_s_c * cs, mask=cmask)
+        alpha_prev = tl.load(alpha_ptr + tc * state_s_t + state_s_c * cs, mask=cmask)
+        beta_prev = tl.load(beta_ptr + tc * state_s_t + state_s_c * cs, mask=cmask)
         euk = tl.exp(u + kt)
         ek = tl.exp(kt)
 
         denom = beta_prev + euk
         denom_sq = denom * denom
 
-        gwkvt = tl.load(gwkv_ptr + tc * gwkv_s_t)
+        gwkvt = tl.load(gwkv_ptr + tc * gwkv_s_t + gwkv_s_c * cs, mask=cmask)
 
-        gk = 0.0
-        gv = 0.0
+        gk = tl.zeros_like(kt)
+        gv = tl.zeros_like(vt)
 
         # Backpropagates wkv gradients.
         guk = gwkvt * euk * (beta_prev * vt - alpha_prev) / denom_sq
@@ -259,20 +297,20 @@ def wkv_vanilla_triton_backward_kernel(
         gk += gbeta * ek
 
         # Stores the gradients for k and v.
-        tl.store(gk_ptr + tc * gk_s_t, gk)
-        tl.store(gv_ptr + tc * gv_s_t, gv)
+        tl.store(gk_ptr + tc * gk_s_t + gk_s_c * cs, gk, mask=cmask)
+        tl.store(gv_ptr + tc * gv_s_t + gv_s_c * cs, gv, mask=cmask)
 
         # Computes new gradients for alpha and beta.
         galpha = galpha * ew + galpha_wkv
         gbeta = gbeta * ew + gbeta_wkv
 
     # Stores final gradients for alpha and beta.
-    tl.store(gstate_ptr + b_idx * gstate_s_b + c_idx * gstate_s_c, galpha)
-    tl.store(gstate_ptr + b_idx * gstate_s_b + gstate_s_ab + c_idx * gstate_s_c, gbeta)
+    tl.store(gstate_ptr + b_idx * gstate_s_b + gstate_s_c * cs, galpha, mask=cmask)
+    tl.store(gstate_ptr + b_idx * gstate_s_b + gstate_s_ab + gstate_s_c * cs, gbeta, mask=cmask)
 
     # Stores final gradients for w and u.
-    tl.atomic_add(gw_ptr, gw)
-    tl.atomic_add(gu_ptr, gu)
+    tl.atomic_add(gw_ptr + gw_s_c * cs, gw, mask=cmask)
+    tl.atomic_add(gu_ptr + gu_s_c * cs, gu, mask=cmask)
 
 
 def wkv_triton_vanilla_backward(
@@ -285,14 +323,6 @@ def wkv_triton_vanilla_backward(
     grad_state: Tensor,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     (bsz, tsz, chans), device, dtype = k.shape, k.device, k.dtype
-
-    w = w.contiguous()
-    u = u.contiguous()
-    k = k.contiguous()
-    v = v.contiguous()
-    state = state.contiguous()
-    grad_wkv = grad_wkv.contiguous()
-    grad_state = grad_state.contiguous()
 
     # Checks tensor shapes.
     assert v.shape == (bsz, tsz, chans), f"{v.shape} != {(bsz, tsz, chans)}"
@@ -313,7 +343,7 @@ def wkv_triton_vanilla_backward(
     gv = torch.empty_like(v, memory_format=torch.contiguous_format)
     gstate = k.new_empty(bsz, 2, 1, chans)
 
-    wkv_vanilla_triton_backward_kernel[(bsz, chans)](
+    wkv_vanilla_triton_backward_kernel[(bsz,)](
         # W
         w,
         w.stride(0),
@@ -369,6 +399,8 @@ def wkv_triton_vanilla_backward(
         gstate.stride(3),
         # Params
         tsz,
+        chans,
+        BLOCK_SIZE_C=min(triton.next_power_of_2(chans), 32),
     )
 
     return gw, gu, gk, gv, gstate
