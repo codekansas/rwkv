@@ -1,3 +1,4 @@
+# mypy: disable-error-code="import"
 """Triton kernel utility functions."""
 
 import torch
