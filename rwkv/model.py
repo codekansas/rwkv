@@ -26,7 +26,7 @@ Additionally, using the training mode CUDA kernel requires installing ``triton``
 
 .. code-block:: bash
 
-    pip install
+    pip install triton
 
 The choices for the model key are:
 

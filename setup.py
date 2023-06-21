@@ -33,6 +33,6 @@ setup(
     python_requires=">=3.10",
     install_requires=["ml-starter", "tokenizers"],
     tests_require=["ml-starter[dev]"],
-    extras_require={"dev": ["ml-starter[dev]"]},
+    extras_require={"dev": ["ml-starter[dev]"], "docs": ["ml-starter[docs]"]},
     package_data={"rwkv": ["py.typed"]},
 )

@@ -21,7 +21,7 @@ jobs:
 
     # We don't need to run on all platforms since this package is
     # platform-agnostic. The output wheel is something like
-    # "ml_starter-<version>-py3-none-any.whl".
+    # "rwkv-<version>-py3-none-any.whl".
     runs-on: ubuntu-latest
 
     steps:
@@ -46,3 +46,56 @@ jobs:
         with:
           user: __token__
           password: ${{ secrets.PYPI_API_TOKEN }}
+
+  build-docs:
+    timeout-minutes: 10
+    name: Build documentation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Restore cache
+        id: restore-cache
+        uses: actions/cache/restore@v3
+        with:
+          path: |
+            ${{ env.pythonLocation }}
+            .mypy_cache
+          key: python-requirements-${{ env.pythonLocation }}-${{ github.event.pull_request.base.sha || github.sha }}
+          restore-keys: |
+            python-requirements-${{ env.pythonLocation }}
+            python-requirements-
+
+      - name: Install package
+        run: |
+          pip install --upgrade --upgrade-strategy eager --extra-index-url https://download.pytorch.org/whl/cpu -e '.[docs]'
+          cd docs && make install-requirements
+
+      - name: Run static checks
+        run: |
+          cd docs && make full-html
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v1
+        with:
+          path: docs/_build/html
+
+  deploy-docs:
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build-docs
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v1
