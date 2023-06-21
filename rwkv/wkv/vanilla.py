@@ -57,11 +57,11 @@ def wkv_vanilla_backward(
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     bsz, tsz, chans = k.shape
 
-    assert w.shape == u.shape == (chans,)
-    assert v.shape == (bsz, tsz, chans)
-    assert state.shape == (bsz, 2, tsz + 1, chans)
-    assert grad_wkv.shape == (bsz, tsz, chans)
-    assert grad_state.shape == (bsz, 2, 1, chans)
+    assert w.shape == u.shape == (chans,), f"{w.shape}, {u.shape} != {(chans,)}"
+    assert v.shape == (bsz, tsz, chans), f"{v.shape} != {(bsz, tsz, chans)}"
+    assert state.shape == (bsz, 2, tsz, chans), f"{state.shape} != {(bsz, 2, tsz, chans)}"
+    assert grad_wkv.shape == (bsz, tsz, chans), f"{grad_wkv.shape} != {(bsz, tsz, chans)}"
+    assert grad_state.shape == (bsz, 2, 1, chans), f"{grad_state.shape} != {(bsz, 2, 1, chans)}"
 
     alpha, beta = state.chunk(2, dim=1)  # (B, 1, T + 1, D), (B, 1, T + 1, D)
     grad_alpha, grad_beta = grad_state[:, :, 0].chunk(2, dim=1)  # (B, 1, D), (B, 1, D)
@@ -80,7 +80,7 @@ def wkv_vanilla_backward(
         ek = torch.exp(kt)
 
         denom = beta_prev + euk
-        denom_sq = denom**2
+        denom_sq = denom * denom
 
         grad_wkvt = grad_wkv[:, t : t + 1]
 
@@ -93,16 +93,16 @@ def wkv_vanilla_backward(
         grad_alpha_wkv = grad_wkvt / denom
         grad_beta_wkv = -grad_wkvt * (euk * vt + alpha_prev) / denom_sq
 
-        # Backpropagate alpha gradients.
+        # Backpropagates alpha gradients.
         grad_w += (grad_alpha * ew * alpha_prev).flatten(0, -2).sum(0)
         grad_k[:, t : t + 1] += grad_alpha * ek * vt
         grad_v[:, t : t + 1] += grad_alpha * ek
 
-        # Backpropagate beta gradients.
+        # Backpropagates beta gradients.
         grad_w += (grad_beta * ew * beta_prev).flatten(0, -2).sum(0)
         grad_k[:, t : t + 1] += grad_beta * ek
 
-        # Compute gradients for alpha and beta.
+        # Computes gradients for alpha and beta.
         grad_alpha = grad_alpha * ew + grad_alpha_wkv
         grad_beta = grad_beta * ew + grad_beta_wkv
 
@@ -120,7 +120,7 @@ class WkvVanilla(Function):
         state: Tensor,
     ) -> tuple[Tensor, Tensor]:
         wkv, state_out = wkv_vanilla_forward(w, u, k, v, state)
-        ctx.save_for_backward(w, u, k, v, state_out)
+        ctx.save_for_backward(w, u, k, v, state_out[:, :, :-1])
         return wkv, state_out[:, :, -1:]
 
     @staticmethod

@@ -98,7 +98,7 @@ def wkv_log_space_backward(
 
     assert w.shape == u.shape == (chans,)
     assert v.shape == (bsz, tsz, chans)
-    assert state.shape == (bsz, 3, tsz + 1, chans)
+    assert state.shape == (bsz, 3, tsz, chans)
     assert grad_wkv.shape == (bsz, tsz, chans)
     assert grad_state.shape == (bsz, 3, 1, chans)
 
@@ -176,7 +176,7 @@ class WkvLogSpace(Function):
         state: Tensor,
     ) -> tuple[Tensor, Tensor]:
         wkv, state_out = wkv_log_space_forward(w, u, k, v, state)
-        ctx.save_for_backward(w, u, k, v, state_out)
+        ctx.save_for_backward(w, u, k, v, state_out[:, :, :-1])
         return wkv, state_out[:, :, -1:]
 
     @staticmethod
