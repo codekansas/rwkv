@@ -45,6 +45,7 @@ def test_wkv_matches(impls: tuple[WkvImpl, WkvImpl]) -> None:
     assert torch.allclose(wkv_a, wkv_b)
 
 
+@pytest.mark.has_triton()
 @pytest.mark.parametrize("impls", TRITON_IMPLS)
 def test_triton_wkv_matches(impls: tuple[WkvImpl, WkvImpl]) -> None:
     bsz, tsz, chans = 2, 7, 16
