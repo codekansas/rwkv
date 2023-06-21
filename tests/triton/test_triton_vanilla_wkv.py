@@ -40,8 +40,14 @@ def test_triton_vanilla_wkv() -> None:
     dw_ref, du_ref, dk_ref, dv_ref, dstate_ref = wkv_vanilla_backward(w, u, k, v, state_out_ref, grad_wkv, grad_state)
     dw, du, dk, dv, dstate = wkv_triton_vanilla_backward(w, u, k, v, state_out, grad_wkv, grad_state)
 
-    for a, b in [(dw_ref, dw), (du_ref, du), (dk_ref, dk), (dv_ref, dv), (dstate_ref, dstate)]:
-        assert torch.allclose(a, b)
+    for a, b, name in [
+        (dw_ref, dw, "dw"),
+        (du_ref, du, "du"),
+        (dk_ref, dk, "dk"),
+        (dv_ref, dv, "dv"),
+        (dstate_ref, dstate, "dstate"),
+    ]:
+        assert torch.allclose(a, b), f"{name} is not close!"
 
 
 if __name__ == "__main__":
