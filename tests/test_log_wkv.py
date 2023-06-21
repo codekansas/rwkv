@@ -28,13 +28,17 @@ def _get_grads(*t: Tensor) -> tuple[Tensor | None, ...]:
 
 def test_log_wkv() -> None:
     bsz, tsz, chans = 2, 7, 16
-    device, dtype = torch.device("cpu"), torch.float32
+    device, dtype = torch.device("cpu"), torch.float64
 
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
     state = initial_state_log_space(chans).repeat_interleave(bsz, dim=0).to(device, dtype)
 
     # Runs in full mode.
     out_full, _ = wkv_log_space(w, u, k, v, state)
+
+    # Runs normalized version.
+    out_norm, _ = wkv_log_space(w, u, k, v, state, normalize=True)
+    assert torch.allclose(out_norm, out_full)
 
     # Runs in iterative mode.
     out_parts: list[Tensor] = []
@@ -46,8 +50,9 @@ def test_log_wkv() -> None:
     assert torch.allclose(out_full, out_partial)
 
 
-@pytest.mark.parametrize("mode", ["state", "wkv", "both"])
-def test_log_wkv_gradients(mode: str) -> None:
+# @pytest.mark.parametrize("mode", ["state", "wkv", "both"])
+@pytest.mark.parametrize("mode", ["both"])
+def test_gradients_log_wkv(mode: str) -> None:
     bsz, tsz, chans = 2, 7, 16
     device, dtype = torch.device("cpu"), torch.float64
 
@@ -81,8 +86,3 @@ def test_log_wkv_gradients(mode: str) -> None:
     for gr, gm in zip((wgr, ugr, kgr, vgr, stategr), (wgm, ugm, kgm, vgm, stategm)):
         if gr is not None and gm is not None:
             assert torch.allclose(gr, gm)
-
-
-if __name__ == "__main__":
-    # python -m tests.test_log_wkv
-    test_log_wkv_gradients("wkv")

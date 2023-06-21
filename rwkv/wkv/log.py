@@ -188,13 +188,12 @@ class WkvLogSpace(Function):
         ctx: FunctionCtx,
         grad_wkv: Tensor,
         grad_state: Tensor,
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, None]:
         if ctx.normalize:
             raise NotImplementedError("Backward pass for normalized operation is incorrect")
-        w, u, k, v, state, normalize = cast(tuple[Tensor, ...], ctx.saved_tensors)
-        if normalize:
-            raise NotImplementedError("Backward pass for normalized operation is incorrect")
-        return wkv_log_space_backward(w, u, k, v, state, grad_wkv, grad_state)
+        w, u, k, v, state = cast(tuple[Tensor, ...], ctx.saved_tensors)
+        gw, gu, gk, gv, gstate = wkv_log_space_backward(w, u, k, v, state, grad_wkv, grad_state)
+        return gw, gu, gk, gv, gstate, None
 
 
 def initial_state_log_space(emb_dim: int) -> Tensor:
