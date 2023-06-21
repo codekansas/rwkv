@@ -4,7 +4,6 @@ import pytest
 import torch
 from torch import Tensor
 
-from rwkv.triton.wkv.vanilla import wkv_triton_vanilla_backward, wkv_triton_vanilla_forward
 from rwkv.wkv.vanilla import initial_state_vanilla, wkv_vanilla_backward, wkv_vanilla_forward
 
 
@@ -18,6 +17,8 @@ def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dty
 
 @pytest.mark.has_triton()
 def test_triton_vanilla_wkv() -> None:
+    from rwkv.triton.wkv.vanilla import wkv_triton_vanilla_backward, wkv_triton_vanilla_forward
+
     bsz, tsz, chans = 2, 7, 16
     device, dtype = torch.device("cuda"), torch.float32
 
