@@ -22,6 +22,8 @@ def create_rst(module_name: str) -> None:
 # Walk the source directory and create RST files for all Python modules
 all_files = []
 for root, _, files in os.walk(source_dir):
+    if "triton" in root:
+        continue
     for file in files:
         if file.endswith(".py") and file != "__init__.py":
             module_path = os.path.join(root, file)
@@ -29,16 +31,18 @@ for root, _, files in os.walk(source_dir):
             create_rst(module_name)
             all_files.append(module_name)
 
+# Create a file for the current subdirectory
 index_content = """
-Full API Reference
-==================
+rwkv
+====
 
 .. toctree::
-   :maxdepth: 2
-   :caption: Contents:
+    :maxdepth: 2
+    :caption: Contents:
 
-   rwkv.rst
 """
+for file in sorted(all_files):
+    index_content += f"    {file}\n"
 
 with open("rwkv.rst", "w") as f:
     f.write(index_content.strip())

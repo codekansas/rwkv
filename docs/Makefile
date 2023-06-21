@@ -27,4 +27,7 @@ generate-rst:
 
 full-html: generate-rst html
 
+install-requirements:
+	pip install -r requirements.txt
+
 .PHONY: help Makefile remove-rwkv clean-all generate-rst full-html

@@ -21,7 +21,7 @@ jobs:
 
     # We don't need to run on all platforms since this package is
     # platform-agnostic. The output wheel is something like
-    # "ml_starter-<version>-py3-none-any.whl".
+    # "rwkv-<version>-py3-none-any.whl".
     runs-on: ubuntu-latest
 
     steps:
@@ -76,6 +76,7 @@ jobs:
       - name: Install package
         run: |
           pip install --upgrade --upgrade-strategy eager --extra-index-url https://download.pytorch.org/whl/cpu -e '.[docs]'
+          cd docs && make install-requirements
 
       - name: Run static checks
         run: |
