@@ -6,6 +6,7 @@ implementation which offsets the exponents.
 """
 
 import math
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -16,15 +17,15 @@ EPS = 1e-9
 
 @torch.jit.script
 def logaddexp(a: Tensor, b: Tensor) -> Tensor:
-    # max_av = torch.maximum(a, b)
-    # return max_av + torch.log(torch.exp(a - max_av) + torch.exp(b - max_av))
+    # max_ab = torch.maximum(a, b)
+    # return max_avb + torch.log(torch.exp(a - max_ab) + torch.exp(b - max_ab))
     return torch.logaddexp(a, b)
 
 
 @torch.jit.script
 def logsubexp(a: Tensor, b: Tensor, log_eps: float) -> Tensor:
-    max_av = torch.maximum(torch.maximum(a, b), torch.full_like(a, log_eps))
-    return max_av + torch.log(torch.exp(a - max_av) - torch.exp(b - max_av))
+    max_ab = torch.clamp_min(torch.maximum(a, b), log_eps)
+    return max_ab + torch.log(torch.exp(a - max_ab) - torch.exp(b - max_ab))
 
 
 @torch.jit.script
@@ -174,8 +175,10 @@ class WkvLogSpace(Function):
         k: Tensor,
         v: Tensor,
         state: Tensor,
+        normalize: bool,
     ) -> tuple[Tensor, Tensor]:
-        wkv, state_out = wkv_log_space_forward(w, u, k, v, state)
+        wkv, state_out = wkv_log_space_forward(w, u, k, v, state, normalize)
+        ctx.normalize = normalize
         ctx.save_for_backward(w, u, k, v, state_out[:, :, :-1])
         return wkv, state_out[:, :, -1:]
 
@@ -186,7 +189,11 @@ class WkvLogSpace(Function):
         grad_wkv: Tensor,
         grad_state: Tensor,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-        w, u, k, v, state = ctx.saved_tensors
+        if ctx.normalize:
+            raise NotImplementedError("Backward pass for normalized operation is incorrect")
+        w, u, k, v, state, normalize = cast(tuple[Tensor, ...], ctx.saved_tensors)
+        if normalize:
+            raise NotImplementedError("Backward pass for normalized operation is incorrect")
         return wkv_log_space_backward(w, u, k, v, state, grad_wkv, grad_state)
 
 
@@ -194,7 +201,14 @@ def initial_state_log_space(emb_dim: int) -> Tensor:
     return torch.full((1, 3, 1, emb_dim), float("-inf"))
 
 
-def wkv_log_space(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tensor) -> tuple[Tensor, Tensor]:
+def wkv_log_space(
+    w: Tensor,
+    u: Tensor,
+    k: Tensor,
+    v: Tensor,
+    state: Tensor,
+    normalize: bool = False,
+) -> tuple[Tensor, Tensor]:
     """Runs the core WKV computation.
 
     Args:
@@ -204,10 +218,12 @@ def wkv_log_space(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tensor) -> 
         v: The V tensor, with shape (B, T, D)
         state: The state tensor, with shape (B, 3, D), consisting of the
             alpha plus, alpha minus and beta tensors, each with shape (B, 1, D)
+        normalize: Normalize alpha plus and minus on each step (this will
+            currently break autograd).
 
     Returns:
         The WKV tensor, with shape (B, T, D), and the next state, with shape
         (B, 2, D), consisting of the next alpha plus, alpha minus and beta
         tensors, each with shape (B, 1, D)
     """
-    return WkvLogSpace.apply(w, u, k, v, state)
+    return WkvLogSpace.apply(w, u, k, v, state, normalize)

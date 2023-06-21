@@ -4,6 +4,8 @@
 This implementation follows the official implementation.
 """
 
+from typing import cast
+
 import torch
 from torch import Tensor
 from torch.autograd.function import Function, FunctionCtx, once_differentiable
@@ -92,7 +94,7 @@ def wkv_with_eps_backward(
         euke = torch.exp(ukt + eps_prev - 2 * tau)
 
         denom = e1 * beta_prev + e2
-        denom_sq = denom**2
+        denom_sq = denom * denom
 
         grad_wkvt = grad_wkv[:, t : t + 1]
 
@@ -157,7 +159,7 @@ class WkvWithEps(Function):
         grad_wkv: Tensor,
         grad_state: Tensor,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-        w, u, k, v, state = ctx.saved_tensors
+        w, u, k, v, state = cast(tuple[Tensor, ...], ctx.saved_tensors)
         return wkv_with_eps_backward(w, u, k, v, state, grad_wkv, grad_state)
 
 
