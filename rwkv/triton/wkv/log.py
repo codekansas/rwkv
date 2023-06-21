@@ -1,5 +1,5 @@
 # mypy: disable-error-code="import, no-untyped-def, override"
-# ruff: noqa: ANN001, ANN201, ANN203, N803, N806
+# ruff: noqa: ANN001, ANN201, ANN202, N803, N806
 """Defines Triton kernels for the log-space RWKV forward and backward passes."""
 
 import math
@@ -27,7 +27,7 @@ def logsubexp(a, b, log_eps: tl.constexpr):
 
 
 @triton.jit
-def wkv_triton_with_eps_forward_kernel(
+def wkv_triton_log_space_forward_kernel(
     # W
     w_ptr,
     w_s_c,
@@ -121,7 +121,7 @@ def wkv_triton_with_eps_forward_kernel(
         tl.store(ln_beta_out_ptr + t * state_out_s_t + cs * state_out_s_c, ln_beta, mask=cmask)
 
 
-def wkv_triton_with_eps_forward(
+def wkv_triton_log_space_forward(
     w: Tensor,
     u: Tensor,
     k: Tensor,
@@ -146,7 +146,7 @@ def wkv_triton_with_eps_forward(
     wkvs = k.new_empty(bsz, tsz, chans)
     state_out = k.new_empty(bsz, 3, tsz, chans)
 
-    wkv_triton_with_eps_forward_kernel[(bsz, chans)](
+    wkv_triton_log_space_forward_kernel[(bsz, chans)](
         # W
         w,
         w.stride(0),
@@ -183,7 +183,7 @@ def wkv_triton_with_eps_forward(
         chans,
         tsz,
         eps=eps,
-        logeps=math.log(eps),
+        log_eps=math.log(eps),
         normalize=normalize,
         BLOCK_SIZE_C=min(triton.next_power_of_2(chans), 32),
     )
@@ -194,7 +194,7 @@ def wkv_triton_with_eps_forward(
 
 
 @triton.jit
-def wkv_with_eps_triton_backward_kernel(
+def wkv_log_space_triton_backward_kernel(
     # W
     w_ptr,
     w_s_c,
@@ -368,7 +368,7 @@ def wkv_with_eps_triton_backward_kernel(
     tl.atomic_add(gu_ptr + gu_s_c * cs, gu, mask=cmask)
 
 
-def wkv_triton_with_eps_backward(
+def wkv_triton_log_space_backward(
     w: Tensor,
     u: Tensor,
     k: Tensor,
@@ -399,7 +399,7 @@ def wkv_triton_with_eps_backward(
     gv = torch.empty_like(v)
     gstate = k.new_empty(bsz, 3, 1, chans)
 
-    wkv_with_eps_triton_backward_kernel[(bsz,)](
+    wkv_log_space_triton_backward_kernel[(bsz,)](
         # W
         w,
         w.stride(0),
@@ -475,7 +475,7 @@ class WKVTritonFunction(Function):
         eps: float,
         normalize: bool,
     ) -> tuple[Tensor, Tensor]:
-        wkv, state_out = wkv_triton_with_eps_forward(w, u, k, v, state, eps, normalize)
+        wkv, state_out = wkv_triton_log_space_forward(w, u, k, v, state, eps, normalize)
         ctx.normalize = normalize
         ctx.eps = eps
         ctx.save_for_backward(w, u, k, v, state_out[:, :, :-1])
@@ -491,11 +491,11 @@ class WKVTritonFunction(Function):
         if ctx.normalize:
             raise NotImplementedError("Backward pass for normalized operation is incorrect")
         w, u, k, v, state = cast(tuple[Tensor, ...], ctx.saved_tensors)
-        gw, gu, gk, gv, gstate = wkv_triton_with_eps_backward(w, u, k, v, state, gwkv, gstate, ctx.eps)
+        gw, gu, gk, gv, gstate = wkv_triton_log_space_backward(w, u, k, v, state, gwkv, gstate, ctx.eps)
         return gw, gu, gk, gv, gstate, None
 
 
-def wkv_triton_with_eps(
+def wkv_triton_log_space(
     w: Tensor,
     u: Tensor,
     k: Tensor,

@@ -261,7 +261,7 @@ def wkv_with_eps_triton_backward_kernel(
 
     alpha_prev = tl.load(alpha_ptr + tsz * state_s_t + state_s_c * cs, mask=cmask)
     beta_prev = tl.load(beta_ptr + tsz * state_s_t + state_s_c * cs, mask=cmask)
-    eps_prev =  tl.load(eps_ptr + tsz * state_s_t + state_s_c * cs, mask=cmask)
+    eps_prev = tl.load(eps_ptr + tsz * state_s_t + state_s_c * cs, mask=cmask)
 
     for t in range(tsz):
         tc = tsz - t - 1
@@ -275,7 +275,7 @@ def wkv_with_eps_triton_backward_kernel(
 
         alpha_prev = tl.load(alpha_ptr + tc * state_s_t + state_s_c * cs, mask=cmask)
         beta_prev = tl.load(beta_ptr + tc * state_s_t + state_s_c * cs, mask=cmask)
-        eps_prev =  tl.load(eps_ptr + tc * state_s_t + state_s_c * cs, mask=cmask)
+        eps_prev = tl.load(eps_ptr + tc * state_s_t + state_s_c * cs, mask=cmask)
 
         ukt = u + kt
         tau = tl.maximum(ukt, eps_prev)

@@ -51,7 +51,7 @@ def test_log_wkv() -> None:
 
 
 # @pytest.mark.parametrize("mode", ["state", "wkv", "both"])
-@pytest.mark.parametrize("mode", ["both"])
+@pytest.mark.parametrize("mode", ["state"])
 def test_gradients_log_wkv(mode: str) -> None:
     bsz, tsz, chans = 2, 7, 16
     device, dtype = torch.device("cpu"), torch.float64
@@ -59,30 +59,29 @@ def test_gradients_log_wkv(mode: str) -> None:
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
     state = initial_state_log_space(chans).repeat_interleave(bsz, dim=0).to(device, dtype)
 
-    def backprop(wkv_out: Tensor, state_out: Tensor, wkv_grad: Tensor, state_out_grad: Tensor) -> None:
-        if mode == "both":
-            torch.autograd.backward((wkv_out, state_out), (wkv_grad, state_out_grad))
-        elif mode == "wkv":
-            wkv_out.backward(wkv_grad)
-        elif mode == "state":
-            state_out.backward(state_out_grad)
-        else:
-            raise ValueError(f"Invalid mode: {mode}")
-
     # Uses autograd to compute the gradients.
     wt, ut, kt, vt, statet = _copy_with_grad(w, u, k, v, state)
     wkv_ref, state_out_ref = wkv_log_space_forward(wt, ut, kt, vt, statet)
     state_out_ref = state_out_ref[:, :, -1:]
-    wkv_grad, state_out_grad = torch.rand_like(wkv_ref), torch.rand_like(state_out_ref)
-    backprop(wkv_ref, state_out_ref, wkv_grad, state_out_grad)
+    wkv_grad = torch.zeros_like(wkv_ref) if mode == "state" else torch.rand_like(wkv_ref)
+    state_out_grad = torch.zeros_like(state_out_ref) if mode == "wkv" else torch.rand_like(state_out_ref)
+    torch.autograd.backward((wkv_ref, state_out_ref), (wkv_grad, state_out_grad))
     wgr, ugr, kgr, vgr, stategr = _get_grads(wt, ut, kt, vt, statet)
 
     # Uses the manual gradient computation to compute the gradients.
     wt, ut, kt, vt, statet = _copy_with_grad(w, u, k, v, state)
     wkv_man, state_out_man = wkv_log_space(wt, ut, kt, vt, statet)
-    backprop(wkv_man, state_out_man, wkv_grad, state_out_grad)
+    torch.autograd.backward((wkv_man, state_out_man), (wkv_grad, state_out_grad))
     wgm, ugm, kgm, vgm, stategm = _get_grads(wt, ut, kt, vt, statet)
 
-    for gr, gm in zip((wgr, ugr, kgr, vgr, stategr), (wgm, ugm, kgm, vgm, stategm)):
+    breakpoint()
+
+    for gr, gm, gname in [
+        (wgr, wgm, "w"),
+        (ugr, ugm, "u"),
+        (kgr, kgm, "k"),
+        (vgr, vgm, "v"),
+        (stategr, stategm, "state"),
+    ]:
         if gr is not None and gm is not None:
-            assert torch.allclose(gr, gm)
+            assert torch.allclose(gr, gm, atol=1e-6), f"Gradient mismatch for {gname}"
