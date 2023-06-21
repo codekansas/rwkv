@@ -15,6 +15,7 @@ markers = [
     "has_gpu: Marks test as requiring a GPU to run",
     "multi_gpu: Marks tests as requiring multiple GPUs to run",
     "has_mps: Marks test as requiring an MPS device to run",
+    "has_triton: Marks test as requiring Triton to run",
 ]
 
 [tool.mypy]
