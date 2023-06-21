@@ -74,8 +74,6 @@ def test_gradients_log_wkv(mode: str) -> None:
     torch.autograd.backward((wkv_man, state_out_man), (wkv_grad, state_out_grad))
     wgm, ugm, kgm, vgm, stategm = _get_grads(wt, ut, kt, vt, statet)
 
-    breakpoint()
-
     for gr, gm, gname in [
         (wgr, wgm, "w"),
         (ugr, ugm, "u"),
