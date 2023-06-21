@@ -6,8 +6,17 @@ from torch import Tensor
 
 from rwkv.wkv import WkvImpl, get_wkv_fn
 
-IMPLS: list[tuple[WkvImpl, WkvImpl]] = [("vanilla", "log"), ("vanilla", "eps"), ("eps", "log"),  ]
-TRITON_IMPLS: list[tuple[WkvImpl, WkvImpl]] = [("vanilla", "triton-vanilla"), ("log", "triton-log"), ("eps", "triton-eps"),]
+IMPLS: list[tuple[WkvImpl, WkvImpl]] = [
+    ("vanilla", "log"),
+    ("vanilla", "eps"),
+    ("eps", "log"),
+]
+
+TRITON_IMPLS: list[tuple[WkvImpl, WkvImpl]] = [
+    ("vanilla", "triton-vanilla"),
+    ("log", "triton-log"),
+    ("eps", "triton-eps"),
+]
 
 
 def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dtype: torch.dtype) -> tuple[Tensor, ...]:

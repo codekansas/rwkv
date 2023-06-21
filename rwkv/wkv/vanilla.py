@@ -59,7 +59,7 @@ def wkv_vanilla_backward(
 
     assert w.shape == u.shape == (chans,), f"{w.shape}, {u.shape} != {(chans,)}"
     assert v.shape == (bsz, tsz, chans), f"{v.shape} != {(bsz, tsz, chans)}"
-    assert state.shape == (bsz, 2, tsz, chans), f"{state.shape} != {(bsz, 2, tsz + 1, chans)}"
+    assert state.shape == (bsz, 2, tsz, chans), f"{state.shape} != {(bsz, 2, tsz, chans)}"
     assert grad_wkv.shape == (bsz, tsz, chans), f"{grad_wkv.shape} != {(bsz, tsz, chans)}"
     assert grad_state.shape == (bsz, 2, 1, chans), f"{grad_state.shape} != {(bsz, 2, 1, chans)}"
 
