@@ -4,6 +4,20 @@ This repository contains my implementation of the pretrained RWKV model, with nu
 
 For an explanation of the math, see [this accompanying blog post](https://ben.bolte.cc/rwkv).
 
+## Getting Started
+
+Install the package:
+
+```
+pip install ml-rwkv
+```
+
+Generate code:
+
+```
+rwkv 169m "Scientists recently discovered a herd of Chinese-speaking goats. To their surprise,"
+```
+
 ## WKV Computations
 
 This repo currently contains 3 different implementations of the WKV computation:

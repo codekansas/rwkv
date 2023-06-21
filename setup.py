@@ -16,9 +16,9 @@ version: str = version_re.group(1)
 
 
 setup(
-    name="rwkv-ml",
+    name="ml-rwkv",
     version=version,
-    description="ML project template repository",
+    description="RWKV implementation that is friendly with `ml-starter`",
     author="Benjamin Bolte",
     url="https://github.com/codekansas/rwkv",
     long_description=long_description,
