@@ -337,10 +337,10 @@ def wkv_triton_vanilla_backward(
         assert t.dtype == dtype and t.device == device, f"{t.dtype} != {dtype} or {t.device} != {device}"
 
     # New tensors to output.
-    gw = torch.zeros_like(w, memory_format=torch.contiguous_format)
-    gu = torch.zeros_like(u, memory_format=torch.contiguous_format)
-    gk = torch.empty_like(k, memory_format=torch.contiguous_format)
-    gv = torch.empty_like(v, memory_format=torch.contiguous_format)
+    gw = torch.zeros_like(w)
+    gu = torch.zeros_like(u)
+    gk = torch.empty_like(k)
+    gv = torch.empty_like(v)
     gstate = k.new_empty(bsz, 2, 1, chans)
 
     wkv_vanilla_triton_backward_kernel[(bsz,)](
