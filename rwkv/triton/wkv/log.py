@@ -89,15 +89,15 @@ def wkv_triton_log_space_forward_kernel(
     ln_beta_out_ptr = state_out_ptr + b_idx * state_out_s_b + 2 * state_out_s_abe
 
     # Loads parameters.
-    ln_alpha_p = tl.load(ln_alpha_p_ptr + cs * state_s_c, mask=cmask)
-    ln_alpha_m = tl.load(ln_alpha_m_ptr + cs * state_s_c, mask=cmask)
-    ln_beta = tl.load(ln_beta_ptr + cs * state_s_c, mask=cmask)
-    w = tl.load(w_ptr + cs * w_s_c, mask=cmask)
-    u = tl.load(u_ptr + cs * u_s_c, mask=cmask)
+    ln_alpha_p = tl.load(ln_alpha_p_ptr + cs * state_s_c, mask=cmask).to(tl.float32)
+    ln_alpha_m = tl.load(ln_alpha_m_ptr + cs * state_s_c, mask=cmask).to(tl.float32)
+    ln_beta = tl.load(ln_beta_ptr + cs * state_s_c, mask=cmask).to(tl.float32)
+    w = tl.load(w_ptr + cs * w_s_c, mask=cmask).to(tl.float32)
+    u = tl.load(u_ptr + cs * u_s_c, mask=cmask).to(tl.float32)
 
     for t in range(tsz):
-        kt = tl.load(k_ptr + t * k_s_t + cs * k_s_c, mask=cmask)
-        vt = tl.load(v_ptr + t * v_s_t + cs * v_s_c, mask=cmask)
+        kt = tl.load(k_ptr + t * k_s_t + cs * k_s_c, mask=cmask).to(tl.float32)
+        vt = tl.load(v_ptr + t * v_s_t + cs * v_s_c, mask=cmask).to(tl.float32)
         vt_p = tl.maximum(vt, 0) + eps
         vt_m = tl.maximum(-vt, 0) + eps
         ln_v_p = tl.log(vt_p)
@@ -147,9 +147,8 @@ def wkv_triton_log_space_forward(
     wkvs = k.new_empty(bsz, tsz, chans)
     state_out = k.new_empty(bsz, 3, tsz, chans)
 
-    block_size_c = triton.cdiv(chans, 64) * 64
-    if block_size_c != chans:
-        warnings.warn(f"Channel dimension {chans} is not a multiple of 32.")
+    # Constants.
+    block_size_c = max(triton.next_power_of_2(chans), 32)
 
     wkv_triton_log_space_forward_kernel[(bsz,)](
         # W
@@ -283,11 +282,11 @@ def wkv_log_space_triton_backward_kernel(
     gbeta_out_ptr = gstate_out_ptr + b_idx * gstate_out_s_b + 2 * gstate_out_s_abe
 
     # Loads parameters.
-    gln_alpha_p = tl.load(galpha_p_out_ptr + gstate_out_s_c * cs, mask=cmask)
-    gln_alpha_m = tl.load(galpha_m_out_ptr + gstate_out_s_c * cs, mask=cmask)
-    gln_beta = tl.load(gbeta_out_ptr + gstate_out_s_c * cs, mask=cmask)
-    w = tl.load(w_ptr + w_s_c * cs, mask=cmask)
-    u = tl.load(u_ptr + u_s_c * cs, mask=cmask)
+    gln_alpha_p = tl.load(galpha_p_out_ptr + gstate_out_s_c * cs, mask=cmask).to(tl.float32)
+    gln_alpha_m = tl.load(galpha_m_out_ptr + gstate_out_s_c * cs, mask=cmask).to(tl.float32)
+    gln_beta = tl.load(gbeta_out_ptr + gstate_out_s_c * cs, mask=cmask).to(tl.float32)
+    w = tl.load(w_ptr + w_s_c * cs, mask=cmask).to(tl.float32)
+    u = tl.load(u_ptr + u_s_c * cs, mask=cmask).to(tl.float32)
 
     # Gradient accumulators.
     gw = tl.zeros_like(w)
@@ -296,16 +295,16 @@ def wkv_log_space_triton_backward_kernel(
     for t in range(tsz):
         tc = tsz - t - 1
 
-        kt = tl.load(k_ptr + tc * k_s_t + k_s_c * cs, mask=cmask)
-        vt = tl.load(v_ptr + tc * v_s_t + v_s_c * cs, mask=cmask)
+        kt = tl.load(k_ptr + tc * k_s_t + k_s_c * cs, mask=cmask).to(tl.float32)
+        vt = tl.load(v_ptr + tc * v_s_t + v_s_c * cs, mask=cmask).to(tl.float32)
         vt_p = tl.maximum(vt, 0) + eps
         vt_m = tl.maximum(-vt, 0) + eps
         ln_v_p = tl.log(vt_p)
         ln_v_m = tl.log(vt_m)
 
-        ln_alpha_p_prev = tl.load(alpha_p_ptr + tc * state_s_t + state_s_c * cs, mask=cmask)
-        ln_alpha_m_prev = tl.load(alpha_m_ptr + tc * state_s_t + state_s_c * cs, mask=cmask)
-        ln_beta_prev = tl.load(beta_ptr + tc * state_s_t + state_s_c * cs, mask=cmask)
+        ln_alpha_p_prev = tl.load(alpha_p_ptr + tc * state_s_t + state_s_c * cs, mask=cmask).to(tl.float32)
+        ln_alpha_m_prev = tl.load(alpha_m_ptr + tc * state_s_t + state_s_c * cs, mask=cmask).to(tl.float32)
+        ln_beta_prev = tl.load(beta_ptr + tc * state_s_t + state_s_c * cs, mask=cmask).to(tl.float32)
 
         uk = u + kt
         ukv_p = uk + ln_v_p
@@ -315,7 +314,7 @@ def wkv_log_space_triton_backward_kernel(
         wkv_p = tl.exp(logaddexp(ukv_p, ln_alpha_p_prev) - ukb)
         wkv_m = tl.exp(logaddexp(ukv_m, ln_alpha_m_prev) - ukb)
 
-        gwkvt = tl.load(gwkv_ptr + tc * gwkv_s_t + gwkv_s_c * cs, mask=cmask)
+        gwkvt = tl.load(gwkv_ptr + tc * gwkv_s_t + gwkv_s_c * cs, mask=cmask).to(tl.float32)
         gln_wkv_p = gwkvt * wkv_p
         gln_wkv_m = gwkvt * -wkv_m
 
@@ -406,9 +405,8 @@ def wkv_triton_log_space_backward(
     gv = torch.empty_like(v)
     gstate = k.new_empty(bsz, 3, 1, chans)
 
-    block_size_c = triton.cdiv(chans, 64) * 64
-    if block_size_c != chans:
-        warnings.warn(f"Channel dimension {chans} is not a multiple of 32.")
+    # Constants.
+    block_size_c = max(triton.next_power_of_2(chans), 32)
 
     wkv_log_space_triton_backward_kernel[(bsz,)](
         # W

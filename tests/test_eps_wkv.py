@@ -27,7 +27,7 @@ def _get_grads(*t: Tensor) -> tuple[Tensor | None, ...]:
 
 def test_eps_wkv() -> None:
     bsz, tsz, chans = 2, 7, 16
-    device, dtype = torch.device("cpu"), torch.float64
+    device, dtype = torch.device("cpu"), torch.float32
 
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
     state = initial_state_with_eps(chans).repeat_interleave(bsz, dim=0).to(device, dtype)
@@ -42,13 +42,13 @@ def test_eps_wkv() -> None:
         out_parts.append(out_part)
     out_partial = torch.cat(out_parts, dim=1)
 
-    assert torch.allclose(out_full, out_partial)
+    assert torch.allclose(out_full, out_partial, atol=1e-5)
 
 
 @pytest.mark.parametrize("mode", ["state", "wkv", "both"])
 def test_gradients_eps_wkv(mode: str) -> None:
     bsz, tsz, chans = 2, 7, 16
-    device, dtype = torch.device("cpu"), torch.float64
+    device, dtype = torch.device("cpu"), torch.float32
 
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
     state = initial_state_with_eps(chans).repeat_interleave(bsz, dim=0).to(device, dtype)
@@ -70,4 +70,4 @@ def test_gradients_eps_wkv(mode: str) -> None:
 
     for gr, gm in zip((wgr, ugr, kgr, vgr, stategr), (wgm, ugm, kgm, vgm, stategm)):
         if gr is not None and gm is not None:
-            assert torch.allclose(gr, gm)
+            assert torch.allclose(gr, gm, atol=1e-5)

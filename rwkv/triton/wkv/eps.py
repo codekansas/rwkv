@@ -71,15 +71,15 @@ def wkv_triton_with_eps_forward_kernel(
     eps_out_ptr = state_out_ptr + b_idx * state_out_s_b + 2 * state_out_s_abe
 
     # Loads parameters.
-    alpha = tl.load(alpha_ptr + cs * state_s_c, mask=cmask)
-    beta = tl.load(beta_ptr + cs * state_s_c, mask=cmask)
-    eps = tl.load(eps_ptr + cs * state_s_c, mask=cmask)
-    w = tl.load(w_ptr + cs * w_s_c, mask=cmask)
-    u = tl.load(u_ptr + cs * u_s_c, mask=cmask)
+    alpha = tl.load(alpha_ptr + cs * state_s_c, mask=cmask).to(tl.float32)
+    beta = tl.load(beta_ptr + cs * state_s_c, mask=cmask).to(tl.float32)
+    eps = tl.load(eps_ptr + cs * state_s_c, mask=cmask).to(tl.float32)
+    w = tl.load(w_ptr + cs * w_s_c, mask=cmask).to(tl.float32)
+    u = tl.load(u_ptr + cs * u_s_c, mask=cmask).to(tl.float32)
 
     for t in range(tsz):
-        kt = tl.load(k_ptr + t * k_s_t + cs * k_s_c, mask=cmask)
-        vt = tl.load(v_ptr + t * v_s_t + cs * v_s_c, mask=cmask)
+        kt = tl.load(k_ptr + t * k_s_t + cs * k_s_c, mask=cmask).to(tl.float32)
+        vt = tl.load(v_ptr + t * v_s_t + cs * v_s_c, mask=cmask).to(tl.float32)
 
         ukt = u + kt
         tau = tl.maximum(ukt, eps)
@@ -122,9 +122,8 @@ def wkv_triton_with_eps_forward(
     wkvs = k.new_empty(bsz, tsz, chans)
     state_out = k.new_empty(bsz, 3, tsz, chans)
 
-    block_size_c = triton.cdiv(chans, 64) * 64
-    if block_size_c != chans:
-        warnings.warn(f"Channel dimension {chans} is not a multiple of 32.")
+    # Constants.
+    block_size_c = max(triton.next_power_of_2(chans), 32)
 
     wkv_triton_with_eps_forward_kernel[(bsz,)](
         # W
@@ -254,33 +253,33 @@ def wkv_with_eps_triton_backward_kernel(
     geps_out_ptr = gstate_out_ptr + b_idx * gstate_out_s_b + 2 * gstate_out_s_abe
 
     # Loads parameters.
-    galpha = tl.load(galpha_out_ptr + gstate_out_s_c * cs, mask=cmask)
-    gbeta = tl.load(gbeta_out_ptr + gstate_out_s_c * cs, mask=cmask)
-    geps = tl.load(geps_out_ptr + gstate_out_s_c * cs, mask=cmask)
-    w = tl.load(w_ptr + w_s_c * cs, mask=cmask)
-    u = tl.load(u_ptr + u_s_c * cs, mask=cmask)
+    galpha = tl.load(galpha_out_ptr + gstate_out_s_c * cs, mask=cmask).to(tl.float32)
+    gbeta = tl.load(gbeta_out_ptr + gstate_out_s_c * cs, mask=cmask).to(tl.float32)
+    geps = tl.load(geps_out_ptr + gstate_out_s_c * cs, mask=cmask).to(tl.float32)
+    w = tl.load(w_ptr + w_s_c * cs, mask=cmask).to(tl.float32)
+    u = tl.load(u_ptr + u_s_c * cs, mask=cmask).to(tl.float32)
 
     # Gradient accumulators.
     gw = tl.zeros_like(w)
     gu = tl.zeros_like(u)
 
-    alpha_prev = tl.load(alpha_ptr + tsz * state_s_t + state_s_c * cs, mask=cmask)
-    beta_prev = tl.load(beta_ptr + tsz * state_s_t + state_s_c * cs, mask=cmask)
-    eps_prev = tl.load(eps_ptr + tsz * state_s_t + state_s_c * cs, mask=cmask)
+    alpha_prev = tl.load(alpha_ptr + tsz * state_s_t + state_s_c * cs, mask=cmask).to(tl.float32)
+    beta_prev = tl.load(beta_ptr + tsz * state_s_t + state_s_c * cs, mask=cmask).to(tl.float32)
+    eps_prev = tl.load(eps_ptr + tsz * state_s_t + state_s_c * cs, mask=cmask).to(tl.float32)
 
     for t in range(tsz):
         tc = tsz - t - 1
 
-        kt = tl.load(k_ptr + tc * k_s_t + k_s_c * cs, mask=cmask)
-        vt = tl.load(v_ptr + tc * v_s_t + v_s_c * cs, mask=cmask)
+        kt = tl.load(k_ptr + tc * k_s_t + k_s_c * cs, mask=cmask).to(tl.float32)
+        vt = tl.load(v_ptr + tc * v_s_t + v_s_c * cs, mask=cmask).to(tl.float32)
 
         alpha_curr = alpha_prev
         beta_curr = beta_prev
         eps_curr = eps_prev
 
-        alpha_prev = tl.load(alpha_ptr + tc * state_s_t + state_s_c * cs, mask=cmask)
-        beta_prev = tl.load(beta_ptr + tc * state_s_t + state_s_c * cs, mask=cmask)
-        eps_prev = tl.load(eps_ptr + tc * state_s_t + state_s_c * cs, mask=cmask)
+        alpha_prev = tl.load(alpha_ptr + tc * state_s_t + state_s_c * cs, mask=cmask).to(tl.float32)
+        beta_prev = tl.load(beta_ptr + tc * state_s_t + state_s_c * cs, mask=cmask).to(tl.float32)
+        eps_prev = tl.load(eps_ptr + tc * state_s_t + state_s_c * cs, mask=cmask).to(tl.float32)
 
         ukt = u + kt
         tau = tl.maximum(ukt, eps_prev)
@@ -292,7 +291,7 @@ def wkv_with_eps_triton_backward_kernel(
         denom = e1 * beta_prev + e2
         denom_sq = denom * denom
 
-        gwkvt = tl.load(gwkv_ptr + tc * gwkv_s_t + gwkv_s_c * cs, mask=cmask)
+        gwkvt = tl.load(gwkv_ptr + tc * gwkv_s_t + gwkv_s_c * cs, mask=cmask).to(tl.float32)
 
         # Backpropagates wkv gradients.
         guk = gwkvt * e2 * (e1 * beta_prev * vt - e1 * alpha_prev) / denom_sq
@@ -379,9 +378,8 @@ def wkv_triton_with_eps_backward(
     gv = torch.empty_like(v)
     gstate = k.new_empty(bsz, 3, 1, chans)
 
-    block_size_c = triton.cdiv(chans, 64) * 64
-    if block_size_c != chans:
-        warnings.warn(f"Channel dimension {chans} is not a multiple of 32.")
+    # Constants.
+    block_size_c = max(triton.next_power_of_2(chans), 32)
 
     wkv_with_eps_triton_backward_kernel[(bsz,)](
         # W

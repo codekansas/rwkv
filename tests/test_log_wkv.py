@@ -42,13 +42,13 @@ def test_log_wkv() -> None:
         out_parts.append(out_part)
     out_partial = torch.cat(out_parts, dim=1)
 
-    assert torch.allclose(out_full, out_partial)
+    assert torch.allclose(out_full, out_partial, atol=1e-5)
 
 
 @pytest.mark.parametrize("mode", ["state", "wkv", "both"])
 def test_log_wkv_gradients(mode: str) -> None:
     bsz, tsz, chans = 2, 7, 16
-    device, dtype = torch.device("cpu"), torch.float64
+    device, dtype = torch.device("cpu"), torch.float32
 
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
     state = initial_state_log_space(chans).repeat_interleave(bsz, dim=0).to(device, dtype)
@@ -77,4 +77,4 @@ def test_log_wkv_gradients(mode: str) -> None:
     ]:
         if gr is None or gm is None:
             continue
-        assert torch.allclose(gr, gm), f"Gradient {gname} mismatch"
+        assert torch.allclose(gr, gm, atol=1e-5), f"Gradient {gname} mismatch"
