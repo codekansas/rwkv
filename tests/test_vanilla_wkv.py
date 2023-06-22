@@ -15,7 +15,7 @@ from rwkv.wkv.vanilla import initial_state_vanilla, wkv_vanilla, wkv_vanilla_for
 
 
 def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dtype: torch.dtype) -> tuple[Tensor, ...]:
-    w = torch.exp(-torch.rand(chans, dtype=dtype, device=device))
+    w = -torch.exp(torch.rand(chans, dtype=dtype, device=device))
     u = torch.rand(chans, dtype=dtype, device=device)
     k = torch.randn(bsz, tsz, chans, dtype=dtype, device=device)
     v = torch.randn(bsz, tsz, chans, dtype=dtype, device=device)
@@ -32,7 +32,7 @@ def _get_grads(*t: Tensor) -> tuple[Tensor | None, ...]:
 
 def test_vanilla_wkv() -> None:
     bsz, tsz, chans = 2, 7, 16
-    device, dtype = torch.device("cpu"), torch.float64
+    device, dtype = torch.device("cpu"), torch.float32
 
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
     state = initial_state_vanilla(chans).repeat_interleave(bsz, dim=0).to(device, dtype)
@@ -47,13 +47,13 @@ def test_vanilla_wkv() -> None:
         out_parts.append(out_part)
     out_partial = torch.cat(out_parts, dim=1)
 
-    assert torch.allclose(out_full, out_partial)
+    assert torch.allclose(out_full, out_partial, atol=1e-5)
 
 
 @pytest.mark.parametrize("mode", ["state", "wkv", "both"])
 def test_gradients_vanilla_wkv(mode: str) -> None:
     bsz, tsz, chans = 2, 7, 16
-    device, dtype = torch.device("cpu"), torch.float64
+    device, dtype = torch.device("cpu"), torch.float32
 
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
     state = initial_state_vanilla(chans).repeat_interleave(bsz, dim=0).to(device, dtype)
@@ -75,4 +75,4 @@ def test_gradients_vanilla_wkv(mode: str) -> None:
 
     for gr, gm in zip((wgr, ugr, kgr, vgr, stategr), (wgm, ugm, kgm, vgm, stategm)):
         if gr is not None and gm is not None:
-            assert torch.allclose(gr, gm)
+            assert torch.allclose(gr, gm, atol=1e-5)

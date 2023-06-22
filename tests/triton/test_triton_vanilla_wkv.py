@@ -8,7 +8,7 @@ from rwkv.wkv.vanilla import initial_state_vanilla, wkv_vanilla_backward, wkv_va
 
 
 def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dtype: torch.dtype) -> tuple[Tensor, ...]:
-    w = torch.exp(-torch.rand(chans, dtype=dtype, device=device))
+    w = -torch.exp(torch.rand(chans, dtype=dtype, device=device))
     u = torch.rand(chans, dtype=dtype, device=device)
     k = torch.randn(bsz, tsz, chans, dtype=dtype, device=device)
     v = torch.randn(bsz, tsz, chans, dtype=dtype, device=device)
@@ -20,8 +20,8 @@ def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dty
 def test_triton_vanilla_wkv(tsz: int) -> None:
     from rwkv.triton.wkv.vanilla import wkv_triton_vanilla_backward, wkv_triton_vanilla_forward
 
-    bsz, chans = 2, 16
-    device, dtype = torch.device("cuda"), torch.float64
+    bsz, chans = 2, 768
+    device, dtype = torch.device("cuda"), torch.float32
 
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
     state = initial_state_vanilla(chans).repeat_interleave(bsz, dim=0).to(device, dtype)
@@ -29,8 +29,8 @@ def test_triton_vanilla_wkv(tsz: int) -> None:
     wkv_ref, state_out_ref = wkv_vanilla_forward(w, u, k, v, state)
     wkv, state_out = wkv_triton_vanilla_forward(w, u, k, v, state)
 
-    assert torch.allclose(wkv_ref, wkv)
-    assert torch.allclose(state_out_ref, state_out)
+    assert torch.allclose(wkv_ref, wkv, atol=1e-5)
+    assert torch.allclose(state_out_ref, state_out, atol=1e-5)
 
     grad_wkv = torch.randn_like(wkv)
     grad_state = torch.randn_like(state_out[:, :, -1:])
@@ -46,7 +46,7 @@ def test_triton_vanilla_wkv(tsz: int) -> None:
         (dv_ref, dv, "dv"),
         (dstate_ref, dstate, "dstate"),
     ]:
-        assert torch.allclose(a, b), f"{name} is not close!"
+        assert torch.allclose(a, b, atol=1e-5), f"{name} is not close!"
 
 
 if __name__ == "__main__":

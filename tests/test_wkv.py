@@ -24,7 +24,7 @@ def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dty
 @pytest.mark.parametrize("impls", IMPLS)
 def test_wkv_matches(impls: tuple[WkvImpl, WkvImpl]) -> None:
     bsz, tsz, chans = 2, 7, 16
-    device, dtype = torch.device("cpu"), torch.float64
+    device, dtype = torch.device("cpu"), torch.float32
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
 
     impl_a, impl_b = impls
@@ -36,14 +36,14 @@ def test_wkv_matches(impls: tuple[WkvImpl, WkvImpl]) -> None:
     wkv_a, _ = wkv_fn_a(w, u, k, v, state_a)
     wkv_b, _ = wkv_fn_b(w, u, k, v, state_b)
 
-    assert torch.allclose(wkv_a, wkv_b)
+    assert torch.allclose(wkv_a, wkv_b, atol=1e-5)
 
 
 @pytest.mark.has_triton()
 @pytest.mark.parametrize("impls", IMPLS)
 def test_triton_wkv_matches(impls: tuple[WkvImpl, WkvImpl]) -> None:
     bsz, tsz, chans = 2, 7, 16
-    device, dtype = torch.device("cuda"), torch.float64
+    device, dtype = torch.device("cuda"), torch.float32
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
 
     impl_a, impl_b = impls
@@ -55,7 +55,7 @@ def test_triton_wkv_matches(impls: tuple[WkvImpl, WkvImpl]) -> None:
     wkv_a, _ = wkv_fn_a(w, u, k, v, state_a)
     wkv_b, _ = wkv_fn_b(w, u, k, v, state_b)
 
-    assert torch.allclose(wkv_a, wkv_b)
+    assert torch.allclose(wkv_a, wkv_b, atol=1e-5)
 
 
 if __name__ == "__main__":

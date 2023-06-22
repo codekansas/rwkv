@@ -73,16 +73,16 @@ def wkv_triton_vanilla_forward_kernel(
     beta_out_ptr = state_out_ptr + b_idx * state_out_s_b + state_out_s_ab
 
     # Loads parameters.
-    alpha = tl.load(alpha_ptr + cs * state_s_c, mask=cmask)
-    beta = tl.load(beta_ptr + cs * state_s_c, mask=cmask)
-    w = tl.load(w_ptr + cs * w_s_c, mask=cmask)
-    u = tl.load(u_ptr + cs * u_s_c, mask=cmask)
+    alpha = tl.load(alpha_ptr + cs * state_s_c, mask=cmask).to(tl.float32)
+    beta = tl.load(beta_ptr + cs * state_s_c, mask=cmask).to(tl.float32)
+    w = tl.load(w_ptr + cs * w_s_c, mask=cmask).to(tl.float32)
+    u = tl.load(u_ptr + cs * u_s_c, mask=cmask).to(tl.float32)
 
     ew = tl.exp(w)
 
     for t in range(tsz):
-        kt = tl.load(k_ptr + t * k_s_t + cs * k_s_c, mask=cmask)
-        vt = tl.load(v_ptr + t * v_s_t + cs * v_s_c, mask=cmask)
+        kt = tl.load(k_ptr + t * k_s_t + cs * k_s_c, mask=cmask).to(tl.float32)
+        vt = tl.load(v_ptr + t * v_s_t + cs * v_s_c, mask=cmask).to(tl.float32)
 
         euk = tl.exp(u + kt)
 
@@ -120,7 +120,10 @@ def wkv_triton_vanilla_forward(
     wkvs = k.new_empty(bsz, tsz, chans)
     state_out = k.new_empty(bsz, 2, tsz, chans)
 
-    wkv_triton_vanilla_forward_kernel[(bsz, chans)](
+    # Constants.
+    block_size_c = max(triton.next_power_of_2(chans), 32)
+
+    wkv_triton_vanilla_forward_kernel[(bsz,)](
         # W
         w,
         w.stride(0),
@@ -156,7 +159,7 @@ def wkv_triton_vanilla_forward(
         # Params
         chans,
         tsz,
-        BLOCK_SIZE_C=min(triton.next_power_of_2(chans), 32),
+        BLOCK_SIZE_C=block_size_c,
     )
 
     state_out = torch.cat((state, state_out), dim=2)
@@ -246,10 +249,10 @@ def wkv_vanilla_triton_backward_kernel(
     gbeta_out_ptr = gstate_out_ptr + b_idx * gstate_out_s_b + gstate_out_s_ab
 
     # Loads parameters.
-    galpha = tl.load(galpha_out_ptr + gstate_out_s_c * cs, mask=cmask)
-    gbeta = tl.load(gbeta_out_ptr + gstate_out_s_c * cs, mask=cmask)
-    w = tl.load(w_ptr + w_s_c * cs, mask=cmask)
-    u = tl.load(u_ptr + u_s_c * cs, mask=cmask)
+    galpha = tl.load(galpha_out_ptr + gstate_out_s_c * cs, mask=cmask).to(tl.float32)
+    gbeta = tl.load(gbeta_out_ptr + gstate_out_s_c * cs, mask=cmask).to(tl.float32)
+    w = tl.load(w_ptr + w_s_c * cs, mask=cmask).to(tl.float32)
+    u = tl.load(u_ptr + u_s_c * cs, mask=cmask).to(tl.float32)
 
     ew = tl.exp(w)
 
@@ -260,11 +263,11 @@ def wkv_vanilla_triton_backward_kernel(
     for t in range(tsz):
         tc = tsz - t - 1
 
-        kt = tl.load(k_ptr + tc * k_s_t + k_s_c * cs, mask=cmask)
-        vt = tl.load(v_ptr + tc * v_s_t + v_s_c * cs, mask=cmask)
+        kt = tl.load(k_ptr + tc * k_s_t + k_s_c * cs, mask=cmask).to(tl.float32)
+        vt = tl.load(v_ptr + tc * v_s_t + v_s_c * cs, mask=cmask).to(tl.float32)
 
-        alpha_prev = tl.load(alpha_ptr + tc * state_s_t + state_s_c * cs, mask=cmask)
-        beta_prev = tl.load(beta_ptr + tc * state_s_t + state_s_c * cs, mask=cmask)
+        alpha_prev = tl.load(alpha_ptr + tc * state_s_t + state_s_c * cs, mask=cmask).to(tl.float32)
+        beta_prev = tl.load(beta_ptr + tc * state_s_t + state_s_c * cs, mask=cmask).to(tl.float32)
 
         euk = tl.exp(u + kt)
         ek = tl.exp(kt)
@@ -272,7 +275,7 @@ def wkv_vanilla_triton_backward_kernel(
         denom = beta_prev + euk
         denom_sq = denom * denom
 
-        gwkvt = tl.load(gwkv_ptr + tc * gwkv_s_t + gwkv_s_c * cs, mask=cmask)
+        gwkvt = tl.load(gwkv_ptr + tc * gwkv_s_t + gwkv_s_c * cs, mask=cmask).to(tl.float32)
 
         # Backpropagates wkv gradients.
         guk = gwkvt * euk * (beta_prev * vt - alpha_prev) / denom_sq
@@ -341,6 +344,9 @@ def wkv_triton_vanilla_backward(
     gv = torch.empty_like(v)
     gstate = k.new_empty(bsz, 2, 1, chans)
 
+    # Constants.
+    block_size_c = max(triton.next_power_of_2(chans), 32)
+
     wkv_vanilla_triton_backward_kernel[(bsz,)](
         # W
         w,
@@ -398,7 +404,7 @@ def wkv_triton_vanilla_backward(
         # Params
         tsz,
         chans,
-        BLOCK_SIZE_C=min(triton.next_power_of_2(chans), 32),
+        BLOCK_SIZE_C=block_size_c,
     )
 
     return gw, gu, gk, gv, gstate
