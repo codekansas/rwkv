@@ -297,7 +297,8 @@ def wkv_with_eps_triton_backward_kernel(
 
         galpha_wkv = gwkvt * e1 / denom
         gbeta_wkv = -gwkvt * e1 * (e2 * vt + e1 * alpha_prev) / denom_sq
-        geps_wkv = gwkvt * euke * (alpha_prev - vt * beta_prev) / (e1 * beta_prev + e2) ** 2
+        geps_wkv_denom = e1 * beta_prev + e2
+        geps_wkv = gwkvt * euke * (alpha_prev - vt * beta_prev) / (geps_wkv_denom * geps_wkv_denom)
 
         e1 = tl.exp(w + eps_prev - eps_curr)
         e2 = tl.exp(kt - eps_curr)
@@ -356,7 +357,7 @@ def wkv_triton_with_eps_backward(
 
     # Checks tensor shapes.
     assert v.shape == (bsz, tsz, chans), f"{v.shape} != {(bsz, tsz, chans)}"
-    assert state.shape == (bsz, 3, tsz, chans), f"{state.shape} != {(bsz, 3, tsz, chans)}"
+    assert state.shape == (bsz, 3, tsz + 1, chans), f"{state.shape} != {(bsz, 3, tsz + 1, chans)}"
     assert w.shape == (chans,), f"{w.shape} != {(chans,)}"
     assert u.shape == (chans,), f"{u.shape} != {(chans,)}"
     assert grad_wkv.shape == (bsz, tsz, chans)

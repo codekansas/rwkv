@@ -20,7 +20,7 @@ def test_triton_with_eps_wkv() -> None:
     from rwkv.triton.wkv.eps import wkv_triton_with_eps_backward, wkv_triton_with_eps_forward
 
     bsz, tsz, chans = 2, 7, 16
-    device, dtype = torch.device("cuda"), torch.float32
+    device, dtype = torch.device("cuda"), torch.float64
 
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
     state = initial_state_with_eps(chans).repeat_interleave(bsz, dim=0).to(device, dtype)
@@ -34,7 +34,7 @@ def test_triton_with_eps_wkv() -> None:
     grad_wkv = torch.randn_like(wkv)
     grad_state = torch.randn_like(state_out[:, :, -1:])
 
-    state_out_ref, state_out = state_out_ref[:, :, :-1], state_out[:, :, :-1]
+    # state_out_ref, state_out = state_out_ref[:, :, :-1], state_out[:, :, :-1]
     dw_ref, du_ref, dk_ref, dv_ref, dstate_ref = wkv_with_eps_backward(w, u, k, v, state_out_ref, grad_wkv, grad_state)
     dw, du, dk, dv, dstate = wkv_triton_with_eps_backward(w, u, k, v, state_out, grad_wkv, grad_state)
 
