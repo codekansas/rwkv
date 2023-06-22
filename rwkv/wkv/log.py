@@ -17,9 +17,8 @@ EPS = 1e-9
 
 @torch.jit.script
 def logaddexp(a: Tensor, b: Tensor) -> Tensor:
-    # max_ab = torch.maximum(a, b)
-    # return max_avb + torch.log(torch.exp(a - max_ab) + torch.exp(b - max_ab))
-    return torch.logaddexp(a, b)
+    max_ab = torch.maximum(a, b)
+    return max_ab + torch.log(torch.exp(a - max_ab) + torch.exp(b - max_ab))
 
 
 @torch.jit.script
@@ -175,10 +174,8 @@ class WkvLogSpace(Function):
         k: Tensor,
         v: Tensor,
         state: Tensor,
-        normalize: bool,
     ) -> tuple[Tensor, Tensor]:
-        wkv, state_out = wkv_log_space_forward(w, u, k, v, state, normalize)
-        ctx.normalize = normalize
+        wkv, state_out = wkv_log_space_forward(w, u, k, v, state)
         ctx.save_for_backward(w, u, k, v, state_out[:, :, :-1])
         return wkv, state_out[:, :, -1:]
 
@@ -188,26 +185,16 @@ class WkvLogSpace(Function):
         ctx: FunctionCtx,
         grad_wkv: Tensor,
         grad_state: Tensor,
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, None]:
-        if ctx.normalize:
-            raise NotImplementedError("Backward pass for normalized operation is incorrect")
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
         w, u, k, v, state = cast(tuple[Tensor, ...], ctx.saved_tensors)
-        gw, gu, gk, gv, gstate = wkv_log_space_backward(w, u, k, v, state, grad_wkv, grad_state)
-        return gw, gu, gk, gv, gstate, None
+        return wkv_log_space_backward(w, u, k, v, state, grad_wkv, grad_state)
 
 
 def initial_state_log_space(emb_dim: int) -> Tensor:
     return torch.full((1, 3, 1, emb_dim), float("-inf"))
 
 
-def wkv_log_space(
-    w: Tensor,
-    u: Tensor,
-    k: Tensor,
-    v: Tensor,
-    state: Tensor,
-    normalize: bool = False,
-) -> tuple[Tensor, Tensor]:
+def wkv_log_space(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tensor) -> tuple[Tensor, Tensor]:
     """Runs the core WKV computation.
 
     Args:
@@ -217,12 +204,10 @@ def wkv_log_space(
         v: The V tensor, with shape (B, T, D)
         state: The state tensor, with shape (B, 3, D), consisting of the
             alpha plus, alpha minus and beta tensors, each with shape (B, 1, D)
-        normalize: Normalize alpha plus and minus on each step (this will
-            currently break autograd).
 
     Returns:
         The WKV tensor, with shape (B, T, D), and the next state, with shape
         (B, 2, D), consisting of the next alpha plus, alpha minus and beta
         tensors, each with shape (B, 1, D)
     """
-    return WkvLogSpace.apply(w, u, k, v, state, normalize)
+    return WkvLogSpace.apply(w, u, k, v, state)
