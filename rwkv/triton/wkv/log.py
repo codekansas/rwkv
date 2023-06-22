@@ -3,7 +3,7 @@
 """Defines Triton kernels for the log-space RWKV forward and backward passes."""
 
 import math
-from typing import cast
+from typing import Any, cast
 
 import torch
 import triton
@@ -70,8 +70,9 @@ def wkv_triton_log_space_forward_kernel(
 ):
     # Parallelize over the batch dimension.
     b_idx = tl.program_id(0)
+    c_idx = tl.program_id(1)
 
-    cs = tl.arange(0, BLOCK_SIZE_C)
+    cs = (c_idx * BLOCK_SIZE_C) + tl.arange(0, BLOCK_SIZE_C)
     cmask = cs < chans
 
     # Pointers to the batch (and possibly channel) for the input tensors.
@@ -147,9 +148,12 @@ def wkv_triton_log_space_forward(
     state_out = k.new_empty(bsz, 3, tsz, chans)
 
     # Constants.
-    block_size_c = max(triton.next_power_of_2(chans), 32)
+    block_size_c = 32
 
-    wkv_triton_log_space_forward_kernel[(bsz,)](
+    def grid(meta: dict[str, Any]) -> tuple[int, ...]:
+        return (bsz, triton.cdiv(chans, meta["BLOCK_SIZE_C"]))
+
+    wkv_triton_log_space_forward_kernel[grid](
         # W
         w,
         w.stride(0),
@@ -259,8 +263,9 @@ def wkv_log_space_triton_backward_kernel(
 ):
     # Parallelize over the batch dimension.
     b_idx = tl.program_id(0)
+    c_idx = tl.program_id(1)
 
-    cs = tl.arange(0, BLOCK_SIZE_C)
+    cs = (c_idx * BLOCK_SIZE_C) + tl.arange(0, BLOCK_SIZE_C)
     cmask = cs < chans
 
     # Pointers to the batch (and possibly channel) for the input tensors.
@@ -405,9 +410,12 @@ def wkv_triton_log_space_backward(
     gstate = k.new_empty(bsz, 3, 1, chans)
 
     # Constants.
-    block_size_c = max(triton.next_power_of_2(chans), 32)
+    block_size_c = 32
 
-    wkv_log_space_triton_backward_kernel[(bsz,)](
+    def grid(meta: dict[str, Any]) -> tuple[int, ...]:
+        return (bsz, triton.cdiv(chans, meta["BLOCK_SIZE_C"]))
+
+    wkv_log_space_triton_backward_kernel[grid](
         # W
         w,
         w.stride(0),
@@ -513,3 +521,11 @@ def wkv_triton_log_space(
     normalize: bool = False,
 ) -> tuple[Tensor, Tensor]:
     return WKVTritonFunction.apply(w, u, k, v, state, eps, normalize)
+
+
+def run_benchmark() -> None:
+    pass
+
+
+if __name__ == "__main__":
+    run_benchmark()

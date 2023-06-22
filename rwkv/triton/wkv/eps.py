@@ -2,7 +2,7 @@
 # ruff: noqa: ANN001, ANN201, ANN202, N803, N806
 """Defines Triton kernels for numerically-stable RWKV forward and backward passes."""
 
-from typing import cast
+from typing import Any, cast
 
 import torch
 import triton
@@ -52,8 +52,9 @@ def wkv_triton_with_eps_forward_kernel(
 ):
     # Parallelize over the batch dimension.
     b_idx = tl.program_id(0)
+    c_idx = tl.program_id(1)
 
-    cs = tl.arange(0, BLOCK_SIZE_C)
+    cs = (c_idx * BLOCK_SIZE_C) + tl.arange(0, BLOCK_SIZE_C)
     cmask = cs < chans
 
     # Pointers to the batch (and possibly channel) for the input tensors.
@@ -82,17 +83,17 @@ def wkv_triton_with_eps_forward_kernel(
 
         ukt = u + kt
         tau = tl.maximum(ukt, eps)
-        e1 = tl.exp(eps - tau)
-        e2 = tl.exp(ukt - tau)
-        wkv = (e1 * alpha + e2 * vt) / (e1 * beta + e2)
+        e1a = tl.exp(eps - tau)
+        e2a = tl.exp(ukt - tau)
+        wkv = (e1a * alpha + e2a * vt) / (e1a * beta + e2a)
         tl.store(wkv_ptr + t * wkv_s_t + cs * wkv_s_c, wkv, mask=cmask)
 
         w_eps = w + eps
         eps = tl.maximum(w_eps, kt)
-        e1 = tl.exp(w_eps - eps)
-        e2 = tl.exp(kt - eps)
-        alpha = e1 * alpha + e2 * vt
-        beta = e1 * beta + e2
+        e1b = tl.exp(w_eps - eps)
+        e2b = tl.exp(kt - eps)
+        alpha = e1b * alpha + e2b * vt
+        beta = e1b * beta + e2b
         tl.store(alpha_out_ptr + t * state_out_s_t + cs * state_out_s_c, alpha, mask=cmask)
         tl.store(beta_out_ptr + t * state_out_s_t + cs * state_out_s_c, beta, mask=cmask)
         tl.store(eps_out_ptr + t * state_out_s_t + cs * state_out_s_c, eps, mask=cmask)
@@ -122,9 +123,12 @@ def wkv_triton_with_eps_forward(
     state_out = k.new_empty(bsz, 3, tsz, chans)
 
     # Constants.
-    block_size_c = max(triton.next_power_of_2(chans), 32)
+    block_size_c = 32
 
-    wkv_triton_with_eps_forward_kernel[(bsz,)](
+    def grid(meta: dict[str, Any]) -> tuple[int, ...]:
+        return (bsz, triton.cdiv(chans, meta["BLOCK_SIZE_C"]))
+
+    wkv_triton_with_eps_forward_kernel[grid](
         # W
         w,
         w.stride(0),
@@ -230,8 +234,9 @@ def wkv_with_eps_triton_backward_kernel(
 ):
     # Parallelize over the batch dimension.
     b_idx = tl.program_id(0)
+    c_idx = tl.program_id(1)
 
-    cs = tl.arange(0, BLOCK_SIZE_C)
+    cs = (c_idx * BLOCK_SIZE_C) + tl.arange(0, BLOCK_SIZE_C)
     cmask = cs < chans
 
     # Pointers to the batch (and possibly channel) for the input tensors.
@@ -378,9 +383,12 @@ def wkv_triton_with_eps_backward(
     gstate = k.new_empty(bsz, 3, 1, chans)
 
     # Constants.
-    block_size_c = max(triton.next_power_of_2(chans), 32)
+    block_size_c = 32
 
-    wkv_with_eps_triton_backward_kernel[(bsz,)](
+    def grid(meta: dict[str, Any]) -> tuple[int, ...]:
+        return (bsz, triton.cdiv(chans, meta["BLOCK_SIZE_C"]))
+
+    wkv_with_eps_triton_backward_kernel[grid](
         # W
         w,
         w.stride(0),

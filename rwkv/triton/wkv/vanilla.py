@@ -7,7 +7,7 @@ faster while using less memory. It requires that ``triton`` is installed, which
 in turn requires a ``triton``-compatible GPU and CUDA version.
 """
 
-from typing import cast
+from typing import Any, cast
 
 import torch
 import triton
@@ -57,8 +57,9 @@ def wkv_triton_vanilla_forward_kernel(
 ):
     # Parallelize over the batch dimension.
     b_idx = tl.program_id(0)
+    c_idx = tl.program_id(1)
 
-    cs = tl.arange(0, BLOCK_SIZE_C)
+    cs = (c_idx * BLOCK_SIZE_C) + tl.arange(0, BLOCK_SIZE_C)
     cmask = cs < chans
 
     # Pointers to the batch (and possibly channel) for the input tensors.
@@ -85,14 +86,12 @@ def wkv_triton_vanilla_forward_kernel(
         vt = tl.load(v_ptr + t * v_s_t + cs * v_s_c, mask=cmask).to(tl.float32)
 
         euk = tl.exp(u + kt)
-
         wkv = (alpha + euk * vt) / (beta + euk)
         tl.store(wkv_ptr + t * wkv_s_t + cs * wkv_s_c, wkv, mask=cmask)
 
         ek = tl.exp(kt)
         alpha = ew * alpha + ek * vt
         beta = ew * beta + ek
-
         tl.store(alpha_out_ptr + t * state_out_s_t + cs * state_out_s_c, alpha, mask=cmask)
         tl.store(beta_out_ptr + t * state_out_s_t + cs * state_out_s_c, beta, mask=cmask)
 
@@ -123,7 +122,10 @@ def wkv_triton_vanilla_forward(
     # Constants.
     block_size_c = max(triton.next_power_of_2(chans), 32)
 
-    wkv_triton_vanilla_forward_kernel[(bsz,)](
+    def grid(meta: dict[str, Any]) -> tuple[int, ...]:
+        return (bsz, triton.cdiv(chans, meta["BLOCK_SIZE_C"]))
+
+    wkv_triton_vanilla_forward_kernel[grid](
         # W
         w,
         w.stride(0),
@@ -229,8 +231,9 @@ def wkv_vanilla_triton_backward_kernel(
 ):
     # Parallelize over the batch dimension.
     b_idx = tl.program_id(0)
+    c_idx = tl.program_id(1)
 
-    cs = tl.arange(0, BLOCK_SIZE_C)
+    cs = (c_idx * BLOCK_SIZE_C) + tl.arange(0, BLOCK_SIZE_C)
     cmask = cs < chans
 
     # Pointers to the batch (and possibly channel) for the input tensors.
@@ -345,9 +348,12 @@ def wkv_triton_vanilla_backward(
     gstate = k.new_empty(bsz, 2, 1, chans)
 
     # Constants.
-    block_size_c = max(triton.next_power_of_2(chans), 32)
+    block_size_c = 32
 
-    wkv_vanilla_triton_backward_kernel[(bsz,)](
+    def grid(meta: dict[str, Any]) -> tuple[int, ...]:
+        return (bsz, triton.cdiv(chans, meta["BLOCK_SIZE_C"]))
+
+    wkv_vanilla_triton_backward_kernel[grid](
         # W
         w,
         w.stride(0),
