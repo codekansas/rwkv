@@ -20,7 +20,7 @@ def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dty
 def test_triton_vanilla_wkv(tsz: int) -> None:
     from rwkv.triton.wkv.vanilla import wkv_triton_vanilla_backward, wkv_triton_vanilla_forward
 
-    bsz, chans = 2, 16
+    bsz, chans = 2, 768
     device, dtype = torch.device("cuda"), torch.float32
 
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
