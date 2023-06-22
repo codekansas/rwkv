@@ -20,7 +20,7 @@ def test_triton_log_space_wkv() -> None:
     from rwkv.triton.wkv.log import wkv_triton_log_space_backward, wkv_triton_log_space_forward
 
     bsz, tsz, chans = 2, 7, 16
-    device, dtype = torch.device("cuda"), torch.float32
+    device, dtype = torch.device("cuda"), torch.float64
 
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
     state = initial_state_log_space(chans).repeat_interleave(bsz, dim=0).to(device, dtype)

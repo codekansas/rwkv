@@ -22,7 +22,7 @@ def logaddexp(a, b):
 
 @triton.jit
 def logsubexp(a, b, log_eps: tl.constexpr):
-    max_ab = tl.clamp_min(tl.maximum(a, b), log_eps)
+    max_ab = tl.maximum(tl.maximum(a, b), log_eps)
     return max_ab + tl.log(tl.exp(a - max_ab) - tl.exp(b - max_ab))
 
 
@@ -97,10 +97,10 @@ def wkv_triton_log_space_forward_kernel(
     for t in range(tsz):
         kt = tl.load(k_ptr + t * k_s_t + cs * k_s_c, mask=cmask)
         vt = tl.load(v_ptr + t * v_s_t + cs * v_s_c, mask=cmask)
-        vt_p = tl.clamp_min(vt, 0) + eps
-        vt_m = tl.clamp_min(-vt, 0) + eps
-        ln_v_p = torch.log(vt_p)
-        ln_v_m = torch.log(vt_m)
+        vt_p = tl.maximum(vt, 0) + eps
+        vt_m = tl.maximum(-vt, 0) + eps
+        ln_v_p = tl.log(vt_p)
+        ln_v_m = tl.log(vt_m)
 
         if normalize:
             ln_alpha_pm = tl.maximum(ln_alpha_p, ln_alpha_m) - eps
@@ -110,7 +110,7 @@ def wkv_triton_log_space_forward_kernel(
         ln_wkv_p = logaddexp(u + kt + ln_v_p, ln_alpha_p) - logaddexp(u + kt, ln_beta)
         ln_wkv_m = logaddexp(u + kt + ln_v_m, ln_alpha_m) - logaddexp(u + kt, ln_beta)
 
-        wkv = torch.exp(ln_wkv_p) - torch.exp(ln_wkv_m)
+        wkv = tl.exp(ln_wkv_p) - tl.exp(ln_wkv_m)
         tl.store(wkv_ptr + t * wkv_s_t + cs * wkv_s_c, wkv, mask=cmask)
 
         ln_alpha_p = logaddexp(w + ln_alpha_p, kt + ln_v_p)
@@ -293,10 +293,10 @@ def wkv_log_space_triton_backward_kernel(
 
         kt = tl.load(k_ptr + tc * k_s_t + k_s_c * cs, mask=cmask)
         vt = tl.load(v_ptr + tc * v_s_t + v_s_c * cs, mask=cmask)
-        vt_p = tl.clamp_min(vt, 0) + eps
-        vt_m = tl.clamp_min(-vt, 0) + eps
-        ln_v_p = torch.log(vt_p)
-        ln_v_m = torch.log(vt_m)
+        vt_p = tl.maximum(vt, 0) + eps
+        vt_m = tl.maximum(-vt, 0) + eps
+        ln_v_p = tl.log(vt_p)
+        ln_v_m = tl.log(vt_m)
 
         ln_alpha_p_prev = tl.load(alpha_p_ptr + tc * state_s_t + state_s_c * cs, mask=cmask)
         ln_alpha_m_prev = tl.load(alpha_m_ptr + tc * state_s_t + state_s_c * cs, mask=cmask)
