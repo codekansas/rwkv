@@ -12,7 +12,7 @@ import torch
 from torch import Tensor
 from torch.autograd.function import Function, FunctionCtx, once_differentiable
 
-EPS = 1e-9
+EPS = 1e-4
 
 
 @torch.jit.script

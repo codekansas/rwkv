@@ -49,5 +49,5 @@ def test_triton_with_eps_wkv() -> None:
 
 
 if __name__ == "__main__":
-    # python -m tests.triton.test_triton_with_eps_wkv
+    # python -m tests.triton.test_triton_eps_wkv
     test_triton_with_eps_wkv()

@@ -11,13 +11,13 @@ import triton.language as tl
 from torch import Tensor
 from torch.autograd.function import Function, FunctionCtx, once_differentiable
 
-EPS = 1e-9
+from rwkv.wkv.log import EPS
 
 
 @triton.jit
 def logaddexp(a, b):
     max_ab = tl.maximum(a, b)
-    return max_ab + tl.log(tl.exp(a - max_ab) - tl.exp(b - max_ab))
+    return max_ab + tl.log(tl.exp(a - max_ab) + tl.exp(b - max_ab))
 
 
 @triton.jit
@@ -103,7 +103,7 @@ def wkv_triton_log_space_forward_kernel(
         ln_v_m = tl.log(vt_m)
 
         if normalize:
-            ln_alpha_pm = tl.maximum(ln_alpha_p, ln_alpha_m) - eps
+            ln_alpha_pm = tl.minimum(ln_alpha_p, ln_alpha_m) - eps
             ln_alpha_p = logsubexp(ln_alpha_p, ln_alpha_pm, log_eps)
             ln_alpha_m = logsubexp(ln_alpha_m, ln_alpha_pm, log_eps)
 
