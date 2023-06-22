@@ -2,6 +2,7 @@
 # ruff: noqa: ANN001, ANN201, ANN202, N803, N806
 """Defines Triton kernels for numerically-stable RWKV forward and backward passes."""
 
+import warnings
 from typing import cast
 
 import torch
@@ -121,7 +122,11 @@ def wkv_triton_with_eps_forward(
     wkvs = k.new_empty(bsz, tsz, chans)
     state_out = k.new_empty(bsz, 3, tsz, chans)
 
-    wkv_triton_with_eps_forward_kernel[(bsz, chans)](
+    block_size_c = triton.cdiv(chans, 64) * 64
+    if block_size_c != chans:
+        warnings.warn(f"Channel dimension {chans} is not a multiple of 32.")
+
+    wkv_triton_with_eps_forward_kernel[(bsz,)](
         # W
         w,
         w.stride(0),
@@ -157,7 +162,7 @@ def wkv_triton_with_eps_forward(
         # Params
         chans,
         tsz,
-        BLOCK_SIZE_C=min(triton.next_power_of_2(chans), 32),
+        BLOCK_SIZE_C=block_size_c,
     )
 
     state_out = torch.cat((state, state_out), dim=2)
@@ -374,6 +379,10 @@ def wkv_triton_with_eps_backward(
     gv = torch.empty_like(v)
     gstate = k.new_empty(bsz, 3, 1, chans)
 
+    block_size_c = triton.cdiv(chans, 64) * 64
+    if block_size_c != chans:
+        warnings.warn(f"Channel dimension {chans} is not a multiple of 32.")
+
     wkv_with_eps_triton_backward_kernel[(bsz,)](
         # W
         w,
@@ -431,7 +440,7 @@ def wkv_triton_with_eps_backward(
         # Params
         tsz,
         chans,
-        BLOCK_SIZE_C=min(triton.next_power_of_2(chans), 32),
+        BLOCK_SIZE_C=block_size_c,
     )
 
     return gw, gu, gk, gv, gstate

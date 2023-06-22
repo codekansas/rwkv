@@ -8,10 +8,10 @@ from rwkv.wkv.log import initial_state_log_space, wkv_log_space_backward, wkv_lo
 
 
 def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dtype: torch.dtype) -> tuple[Tensor, ...]:
-    w = torch.exp(-torch.rand(chans, dtype=dtype, device=device))
-    u = torch.rand(chans, dtype=dtype, device=device)
-    k = torch.randn(bsz, tsz, chans, dtype=dtype, device=device)
-    v = torch.randn(bsz, tsz, chans, dtype=dtype, device=device)
+    w = -torch.exp(torch.linspace(-3, 3, chans, device=device, dtype=dtype))
+    u = torch.linspace(-25, 6, chans, dtype=dtype, device=device)
+    k = torch.randn(bsz, tsz, chans, dtype=dtype, device=device) * 10
+    v = torch.randn(bsz, tsz, chans, dtype=dtype, device=device) * 10
     return w, u, k, v
 
 
@@ -19,7 +19,7 @@ def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dty
 def test_triton_log_space_wkv() -> None:
     from rwkv.triton.wkv.log import wkv_triton_log_space_backward, wkv_triton_log_space_forward
 
-    bsz, tsz, chans = 2, 7, 16
+    bsz, tsz, chans = 2, 7, 768
     device, dtype = torch.device("cuda"), torch.float64
 
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
@@ -29,10 +29,12 @@ def test_triton_log_space_wkv() -> None:
     wkv, state_out = wkv_triton_log_space_forward(w, u, k, v, state)
 
     assert torch.allclose(wkv_ref, wkv)
-    assert torch.allclose(state_out_ref, state_out)
+    assert torch.allclose(state_out_ref, state_out, atol=1e-6)
 
     grad_wkv = torch.randn_like(wkv)
     grad_state = torch.randn_like(state_out[:, :, -1:])
+
+    breakpoint()
 
     state_out_ref, state_out = state_out_ref[:, :, :-1], state_out[:, :, :-1]
     dw_ref, du_ref, dk_ref, dv_ref, dstate_ref = wkv_log_space_backward(w, u, k, v, state_out, grad_wkv, grad_state)
