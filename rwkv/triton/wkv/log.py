@@ -130,7 +130,7 @@ def wkv_triton_log_space_forward(
     eps: float = EPS,
     normalize: bool = False,
 ) -> tuple[Tensor, Tensor]:
-    (bsz, tsz, chans), device, dtype = k.shape, k.device, k.dtype
+    (bsz, tsz, chans), device = k.shape, k.device
 
     # Checks tensor shapes.
     assert v.shape == (bsz, tsz, chans), f"{v.shape} != {(bsz, tsz, chans)}"
@@ -138,9 +138,9 @@ def wkv_triton_log_space_forward(
     assert w.shape == (chans,), f"{w.shape} != {(chans,)}"
     assert u.shape == (chans,), f"{u.shape} != {(chans,)}"
 
-    # Checks tensor dtypes and devices.
+    # Checks tensor devices.
     for t in (v, state, w, u):
-        assert t.dtype == dtype and t.device == device, f"{t.dtype} != {dtype} or {t.device} != {device}"
+        assert t.device == device, f"{t.device} != {device}"
 
     # New tensors to output.
     wkvs = k.new_empty(bsz, tsz, chans)
@@ -383,7 +383,7 @@ def wkv_triton_log_space_backward(
     grad_state: Tensor,
     eps: float = EPS,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-    (bsz, tsz, chans), device, dtype = k.shape, k.device, k.dtype
+    (bsz, tsz, chans), device = k.shape, k.device
 
     # Checks tensor shapes.
     assert v.shape == (bsz, tsz, chans), f"{v.shape} != {(bsz, tsz, chans)}"
@@ -393,9 +393,9 @@ def wkv_triton_log_space_backward(
     assert grad_wkv.shape == (bsz, tsz, chans)
     assert grad_state.shape == (bsz, 3, 1, chans)
 
-    # Checks tensor dtypes and devices.
+    # Checks tensor devices.
     for t in (v, state, w, u, grad_wkv, grad_state):
-        assert t.dtype == dtype and t.device == device, f"{t.dtype} != {dtype} or {t.device} != {device}"
+        assert t.device == device, f"{t.device} != {device}"
 
     # New tensors to output.
     gw = torch.zeros_like(w)
