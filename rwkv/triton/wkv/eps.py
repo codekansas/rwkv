@@ -2,7 +2,6 @@
 # ruff: noqa: ANN001, ANN201, ANN202, N803, N806
 """Defines Triton kernels for numerically-stable RWKV forward and backward passes."""
 
-import warnings
 from typing import cast
 
 import torch

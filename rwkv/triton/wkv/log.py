@@ -3,7 +3,6 @@
 """Defines Triton kernels for the log-space RWKV forward and backward passes."""
 
 import math
-import warnings
 from typing import cast
 
 import torch

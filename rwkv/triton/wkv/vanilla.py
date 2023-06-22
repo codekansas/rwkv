@@ -7,7 +7,6 @@ faster while using less memory. It requires that ``triton`` is installed, which
 in turn requires a ``triton``-compatible GPU and CUDA version.
 """
 
-import warnings
 from typing import cast
 
 import torch
