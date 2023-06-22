@@ -16,10 +16,11 @@ def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dty
 
 
 @pytest.mark.has_triton()
-def test_triton_with_eps_wkv() -> None:
+@pytest.mark.parametrize("tsz", [1, 4])
+def test_triton_with_eps_wkv(tsz: int) -> None:
     from rwkv.triton.wkv.eps import wkv_triton_with_eps_backward, wkv_triton_with_eps_forward
 
-    bsz, tsz, chans = 2, 7, 16
+    bsz, chans = 2, 16
     device, dtype = torch.device("cuda"), torch.float64
 
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
@@ -49,5 +50,5 @@ def test_triton_with_eps_wkv() -> None:
 
 
 if __name__ == "__main__":
-    # python -m tests.triton.test_triton_with_eps_wkv
-    test_triton_with_eps_wkv()
+    # python -m tests.triton.test_triton_eps_wkv
+    test_triton_with_eps_wkv(4)

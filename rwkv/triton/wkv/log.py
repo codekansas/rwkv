@@ -11,13 +11,13 @@ import triton.language as tl
 from torch import Tensor
 from torch.autograd.function import Function, FunctionCtx, once_differentiable
 
-EPS = 1e-9
+from rwkv.wkv.log import EPS
 
 
 @triton.jit
 def logaddexp(a, b):
     max_ab = tl.maximum(a, b)
-    return max_ab + tl.log(tl.exp(a - max_ab) - tl.exp(b - max_ab))
+    return max_ab + tl.log(tl.exp(a - max_ab) + tl.exp(b - max_ab))
 
 
 @triton.jit
@@ -103,7 +103,7 @@ def wkv_triton_log_space_forward_kernel(
         ln_v_m = tl.log(vt_m)
 
         if normalize:
-            ln_alpha_pm = tl.maximum(ln_alpha_p, ln_alpha_m) - eps
+            ln_alpha_pm = tl.minimum(ln_alpha_p, ln_alpha_m) - eps
             ln_alpha_p = logsubexp(ln_alpha_p, ln_alpha_pm, log_eps)
             ln_alpha_m = logsubexp(ln_alpha_m, ln_alpha_pm, log_eps)
 
@@ -317,15 +317,15 @@ def wkv_log_space_triton_backward_kernel(
         # Backpropagates wkv gradients.
         e_num_p = tl.exp(ln_alpha_p_prev - ukv_p)
         e_num_m = tl.exp(ln_alpha_m_prev - ukv_m)
-        e_den = tl.exp(ln_beta_prev - ukb)
+        e_den = tl.exp(ln_beta_prev - uk)
         grad_wkv_den_p = gln_wkv_p / (1 + e_den)
         grad_wkv_den_m = gln_wkv_m / (1 + e_den)
-        grad_kv_p = gln_wkv_p / (1 + e_num_p)
-        grad_kv_m = gln_wkv_m / (1 + e_num_m)
-        grad_uk = grad_kv_p + grad_kv_m - grad_wkv_den_p - grad_wkv_den_m
+        gkv_p = gln_wkv_p / (1 + e_num_p)
+        gkv_m = gln_wkv_m / (1 + e_num_m)
+        grad_uk = gkv_p + gkv_m - grad_wkv_den_p - grad_wkv_den_m
         gu += grad_uk
         gk = grad_uk
-        gv = tl.where(vt > 0, grad_kv_p / vt_p, grad_kv_m / -vt_m)
+        gv = tl.where(vt > 0, gkv_p / vt_p, gkv_m / -vt_m)
 
         gln_alpha_wkv_p = gln_wkv_p / (1 + (1 / e_num_p))
         gln_alpha_wkv_m = gln_wkv_m / (1 + (1 / e_num_m))
@@ -334,11 +334,13 @@ def wkv_log_space_triton_backward_kernel(
         # Backpropagates alpha gradients.
         e_alpha_p = tl.exp(kt + ln_v_p - (w + ln_alpha_p_prev))
         e_alpha_m = tl.exp(kt + ln_v_m - (w + ln_alpha_m_prev))
-        grad_wa_p = gln_alpha_p / (1 + e_alpha_p)
-        grad_wa_m = gln_alpha_m / (1 + e_alpha_m)
-        gw += grad_wa_p + grad_wa_m
-        gk += grad_wa_p + grad_wa_m
-        gv += tl.where(vt > 0, grad_wa_p / vt_p, -grad_wa_m / vt_m)
+        gwa_p = gln_alpha_p / (1 + e_alpha_p)
+        gwa_m = gln_alpha_m / (1 + e_alpha_m)
+        gkv_p = gln_alpha_p / (1 + (1 / e_alpha_p))
+        gkv_m = gln_alpha_m / (1 + (1 / e_alpha_m))
+        gw += gwa_p + gwa_m
+        gk += gkv_p + gkv_m
+        gv += tl.where(vt > 0, gkv_p / vt_p, -gkv_m / vt_m)
 
         # Backpropagates beta gradients.
         e_beta = tl.exp(kt - (w + ln_beta_prev))
@@ -351,8 +353,8 @@ def wkv_log_space_triton_backward_kernel(
         tl.store(gv_ptr + tc * gv_s_t + gv_s_c * cs, gv, mask=cmask)
 
         # Computes new gradients for alpha and beta.
-        gln_alpha_p = gln_alpha_p + gln_alpha_wkv_p
-        gln_alpha_m = gln_alpha_m + gln_alpha_wkv_m
+        gln_alpha_p = gwa_p + gln_alpha_wkv_p
+        gln_alpha_m = gwa_m + gln_alpha_wkv_m
         gln_beta = gwb + gln_beta_wkv
 
     # Stores final gradients for alpha and beta.

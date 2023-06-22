@@ -8,7 +8,7 @@ from rwkv.wkv.vanilla import initial_state_vanilla, wkv_vanilla_backward, wkv_va
 
 
 def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dtype: torch.dtype) -> tuple[Tensor, ...]:
-    w = torch.rand(chans, dtype=dtype, device=device)
+    w = torch.exp(-torch.rand(chans, dtype=dtype, device=device))
     u = torch.rand(chans, dtype=dtype, device=device)
     k = torch.randn(bsz, tsz, chans, dtype=dtype, device=device)
     v = torch.randn(bsz, tsz, chans, dtype=dtype, device=device)
@@ -16,11 +16,12 @@ def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dty
 
 
 @pytest.mark.has_triton()
-def test_triton_vanilla_wkv() -> None:
+@pytest.mark.parametrize("tsz", [1, 4])
+def test_triton_vanilla_wkv(tsz: int) -> None:
     from rwkv.triton.wkv.vanilla import wkv_triton_vanilla_backward, wkv_triton_vanilla_forward
 
-    bsz, tsz, chans = 2, 7, 16
-    device, dtype = torch.device("cuda"), torch.float32
+    bsz, chans = 2, 16
+    device, dtype = torch.device("cuda"), torch.float64
 
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
     state = initial_state_vanilla(chans).repeat_interleave(bsz, dim=0).to(device, dtype)
@@ -50,4 +51,4 @@ def test_triton_vanilla_wkv() -> None:
 
 if __name__ == "__main__":
     # python -m tests.triton.test_triton_vanilla_wkv
-    test_triton_vanilla_wkv()
+    test_triton_vanilla_wkv(4)

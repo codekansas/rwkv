@@ -8,7 +8,7 @@ from rwkv.wkv.log import initial_state_log_space, wkv_log_space_backward, wkv_lo
 
 
 def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dtype: torch.dtype) -> tuple[Tensor, ...]:
-    w = torch.rand(chans, dtype=dtype, device=device)
+    w = torch.exp(-torch.rand(chans, dtype=dtype, device=device))
     u = torch.rand(chans, dtype=dtype, device=device)
     k = torch.randn(bsz, tsz, chans, dtype=dtype, device=device)
     v = torch.randn(bsz, tsz, chans, dtype=dtype, device=device)
@@ -35,7 +35,7 @@ def test_triton_log_space_wkv() -> None:
     grad_state = torch.randn_like(state_out[:, :, -1:])
 
     state_out_ref, state_out = state_out_ref[:, :, :-1], state_out[:, :, :-1]
-    dw_ref, du_ref, dk_ref, dv_ref, dstate_ref = wkv_log_space_backward(w, u, k, v, state_out_ref, grad_wkv, grad_state)
+    dw_ref, du_ref, dk_ref, dv_ref, dstate_ref = wkv_log_space_backward(w, u, k, v, state_out, grad_wkv, grad_state)
     dw, du, dk, dv, dstate = wkv_triton_log_space_backward(w, u, k, v, state_out, grad_wkv, grad_state)
 
     for a, b, name in [
@@ -49,5 +49,5 @@ def test_triton_log_space_wkv() -> None:
 
 
 if __name__ == "__main__":
-    # python -m tests.triton.test_triton_log_space_wkv
+    # python -m tests.triton.test_triton_log_wkv
     test_triton_log_space_wkv()

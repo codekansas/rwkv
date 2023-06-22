@@ -15,7 +15,7 @@ from rwkv.wkv.vanilla import initial_state_vanilla, wkv_vanilla, wkv_vanilla_for
 
 
 def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dtype: torch.dtype) -> tuple[Tensor, ...]:
-    w = torch.rand(chans, dtype=dtype, device=device)
+    w = torch.exp(-torch.rand(chans, dtype=dtype, device=device))
     u = torch.rand(chans, dtype=dtype, device=device)
     k = torch.randn(bsz, tsz, chans, dtype=dtype, device=device)
     v = torch.randn(bsz, tsz, chans, dtype=dtype, device=device)
@@ -58,27 +58,19 @@ def test_gradients_vanilla_wkv(mode: str) -> None:
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
     state = initial_state_vanilla(chans).repeat_interleave(bsz, dim=0).to(device, dtype)
 
-    def backprop(wkv_out: Tensor, state_out: Tensor) -> None:
-        if mode == "both":
-            (wkv_out.sum() + state_out.sum()).backward()
-        elif mode == "wkv":
-            wkv_out.sum().backward()
-        elif mode == "state":
-            state_out.sum().backward()
-        else:
-            raise ValueError(f"Invalid mode: {mode}")
-
     # Uses autograd to compute the gradients.
     wt, ut, kt, vt, statet = _copy_with_grad(w, u, k, v, state)
     wkv_ref, state_out_ref = wkv_vanilla_forward(wt, ut, kt, vt, statet)
     state_out_ref = state_out_ref[:, :, -1:]
-    backprop(wkv_ref, state_out_ref)
+    wkv_grad = torch.zeros_like(wkv_ref) if mode == "state" else torch.rand_like(wkv_ref)
+    state_out_grad = torch.zeros_like(state_out_ref) if mode == "wkv" else torch.rand_like(state_out_ref)
+    torch.autograd.backward((wkv_ref, state_out_ref), (wkv_grad, state_out_grad))
     wgr, ugr, kgr, vgr, stategr = _get_grads(wt, ut, kt, vt, statet)
 
     # Uses the manual gradient computation to compute the gradients.
     wt, ut, kt, vt, statet = _copy_with_grad(w, u, k, v, state)
     wkv_man, state_out_man = wkv_vanilla(wt, ut, kt, vt, statet)
-    backprop(wkv_man, state_out_man)
+    torch.autograd.backward((wkv_man, state_out_man), (wkv_grad, state_out_grad))
     wgm, ugm, kgm, vgm, stategm = _get_grads(wt, ut, kt, vt, statet)
 
     for gr, gm in zip((wgr, ugr, kgr, vgr, stategr), (wgm, ugm, kgm, vgm, stategm)):

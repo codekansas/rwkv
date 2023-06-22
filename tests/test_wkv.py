@@ -12,12 +12,6 @@ IMPLS: list[tuple[WkvImpl, WkvImpl]] = [
     ("eps", "log"),
 ]
 
-TRITON_IMPLS: list[tuple[WkvImpl, WkvImpl]] = [
-    ("vanilla", "triton-vanilla"),
-    ("log", "triton-log"),
-    ("eps", "triton-eps"),
-]
-
 
 def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dtype: torch.dtype) -> tuple[Tensor, ...]:
     w = torch.rand(chans, dtype=dtype, device=device)
@@ -30,12 +24,12 @@ def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dty
 @pytest.mark.parametrize("impls", IMPLS)
 def test_wkv_matches(impls: tuple[WkvImpl, WkvImpl]) -> None:
     bsz, tsz, chans = 2, 7, 16
-    device, dtype = torch.device("cpu"), torch.float32
+    device, dtype = torch.device("cpu"), torch.float64
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
 
     impl_a, impl_b = impls
-    wkv_fn_a, state_a = get_wkv_fn(emb_dim=chans, impl=impl_a)
-    wkv_fn_b, state_b = get_wkv_fn(emb_dim=chans, impl=impl_b)
+    wkv_fn_a, state_a = get_wkv_fn(emb_dim=chans, impl=impl_a, use_triton=False)
+    wkv_fn_b, state_b = get_wkv_fn(emb_dim=chans, impl=impl_b, use_triton=False)
     state_a = state_a.repeat_interleave(bsz, dim=0).to(device, dtype)
     state_b = state_b.repeat_interleave(bsz, dim=0).to(device, dtype)
 
@@ -46,15 +40,15 @@ def test_wkv_matches(impls: tuple[WkvImpl, WkvImpl]) -> None:
 
 
 @pytest.mark.has_triton()
-@pytest.mark.parametrize("impls", TRITON_IMPLS)
+@pytest.mark.parametrize("impls", IMPLS)
 def test_triton_wkv_matches(impls: tuple[WkvImpl, WkvImpl]) -> None:
     bsz, tsz, chans = 2, 7, 16
-    device, dtype = torch.device("cuda"), torch.float32
+    device, dtype = torch.device("cuda"), torch.float64
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
 
     impl_a, impl_b = impls
-    wkv_fn_a, state_a = get_wkv_fn(emb_dim=chans, impl=impl_a)
-    wkv_fn_b, state_b = get_wkv_fn(emb_dim=chans, impl=impl_b)
+    wkv_fn_a, state_a = get_wkv_fn(emb_dim=chans, impl=impl_a, use_triton=False)
+    wkv_fn_b, state_b = get_wkv_fn(emb_dim=chans, impl=impl_b, use_triton=True)
     state_a = state_a.repeat_interleave(bsz, dim=0).to(device, dtype)
     state_b = state_b.repeat_interleave(bsz, dim=0).to(device, dtype)
 

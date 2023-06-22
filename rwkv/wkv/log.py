@@ -12,7 +12,7 @@ import torch
 from torch import Tensor
 from torch.autograd.function import Function, FunctionCtx, once_differentiable
 
-EPS = 1e-9
+EPS = 1e-4
 
 
 @torch.jit.script
@@ -130,8 +130,10 @@ def wkv_log_space_backward(
         e_num_p = torch.exp(ln_alpha_p_prev - ukv_p)
         e_num_m = torch.exp(ln_alpha_m_prev - ukv_m)
         e_den = torch.exp(ln_beta_prev - uk)
-        grad_wkv_den_p, grad_wkv_den_m = grad_ln_wkv_p / (1 + e_den), grad_ln_wkv_m / (1 + e_den)
-        grad_kv_p, grad_kv_m = grad_ln_wkv_p / (1 + e_num_p), grad_ln_wkv_m / (1 + e_num_m)
+        grad_wkv_den_p = grad_ln_wkv_p / (1 + e_den)
+        grad_wkv_den_m = grad_ln_wkv_m / (1 + e_den)
+        grad_kv_p = grad_ln_wkv_p / (1 + e_num_p)
+        grad_kv_m = grad_ln_wkv_m / (1 + e_num_m)
         grad_uk = grad_kv_p + grad_kv_m - grad_wkv_den_p - grad_wkv_den_m
         grad_u += grad_uk.flatten(0, -2).sum(0)
         grad_k[:, t : t + 1] += grad_uk
@@ -147,7 +149,8 @@ def wkv_log_space_backward(
         grad_wa_p = grad_ln_alpha_p / (1 + e_alpha_p)
         grad_wa_m = grad_ln_alpha_m / (1 + e_alpha_m)
         grad_w += (grad_wa_p + grad_wa_m).flatten(0, -2).sum(0)
-        grad_kv_p, grad_kv_m = grad_ln_alpha_p / (1 + (1 / e_alpha_p)), grad_ln_alpha_m / (1 + (1 / e_alpha_m))
+        grad_kv_p = grad_ln_alpha_p / (1 + (1 / e_alpha_p))
+        grad_kv_m = grad_ln_alpha_m / (1 + (1 / e_alpha_m))
         grad_k[:, t : t + 1] += grad_kv_p + grad_kv_m
         grad_v[:, t : t + 1] += torch.where(vt > 0, grad_kv_p / vt_p, -grad_kv_m / vt_m)
 

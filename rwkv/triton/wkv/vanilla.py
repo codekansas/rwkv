@@ -262,8 +262,10 @@ def wkv_vanilla_triton_backward_kernel(
 
         kt = tl.load(k_ptr + tc * k_s_t + k_s_c * cs, mask=cmask)
         vt = tl.load(v_ptr + tc * v_s_t + v_s_c * cs, mask=cmask)
+
         alpha_prev = tl.load(alpha_ptr + tc * state_s_t + state_s_c * cs, mask=cmask)
         beta_prev = tl.load(beta_ptr + tc * state_s_t + state_s_c * cs, mask=cmask)
+
         euk = tl.exp(u + kt)
         ek = tl.exp(kt)
 
