@@ -323,7 +323,7 @@ class RwkvPredictor:
             prompt = torch.tensor([self.tokenizer.encode(prompt).ids])
         assert prompt.dim() == 2 and prompt.shape[0] == 1
 
-        probs, state = self.model(self.model.tensor_to(prompt))
+        probs, state = self.model.forward(self.model.tensor_to(prompt))
         probs = probs[:, -1:]
 
         end_toks_set = set() if end_toks is None else set(end_toks)

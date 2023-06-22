@@ -45,7 +45,7 @@ def test_triton_log_space_wkv() -> None:
         (dv_ref, dv, "dv"),
         (dstate_ref, dstate, "dstate"),
     ]:
-        assert torch.allclose(a, b, atol=1e-4), f"{name} is not close!"
+        assert torch.allclose(a, b), f"{name} is not close!"
 
 
 if __name__ == "__main__":
