@@ -28,7 +28,7 @@ def _get_grads(*t: Tensor) -> tuple[Tensor | None, ...]:
 
 def test_eps_wkv() -> None:
     bsz, tsz, chans = 2, 7, 16
-    device, dtype = torch.device("cpu"), torch.float32
+    device, dtype = torch.device("cpu"), torch.float64
 
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
     state = initial_state_with_eps(chans).repeat_interleave(bsz, dim=0).to(device, dtype)
@@ -47,7 +47,7 @@ def test_eps_wkv() -> None:
 
 
 @pytest.mark.parametrize("mode", ["state", "wkv", "both"])
-def test_eps_wkv_gradients(mode: str) -> None:
+def test_gradients_eps_wkv(mode: str) -> None:
     bsz, tsz, chans = 2, 7, 16
     device, dtype = torch.device("cpu"), torch.float64
 

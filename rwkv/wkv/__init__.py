@@ -62,8 +62,12 @@ def get_wkv_fn(emb_dim: int, impl: WkvImpl | None = None) -> tuple[WkvFn, WkvIni
 
             return wkv_triton_vanilla, initial_state_vanilla(emb_dim)
         case "triton-log":
-            raise NotImplementedError
+            from rwkv.triton.wkv.log import wkv_triton_log_space
+
+            return wkv_triton_log_space, initial_state_log_space(emb_dim)
         case "triton-eps":
-            raise NotImplementedError
+            from rwkv.triton.wkv.eps import wkv_triton_with_eps
+
+            return wkv_triton_with_eps, initial_state_with_eps(emb_dim)
         case _:
             raise ValueError(f"Unknown implementation: {impl}")

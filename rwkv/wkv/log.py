@@ -6,6 +6,7 @@ implementation which offsets the exponents.
 """
 
 import math
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -16,15 +17,14 @@ EPS = 1e-9
 
 @torch.jit.script
 def logaddexp(a: Tensor, b: Tensor) -> Tensor:
-    # max_av = torch.maximum(a, b)
-    # return max_av + torch.log(torch.exp(a - max_av) + torch.exp(b - max_av))
-    return torch.logaddexp(a, b)
+    max_ab = torch.maximum(a, b)
+    return max_ab + torch.log(torch.exp(a - max_ab) + torch.exp(b - max_ab))
 
 
 @torch.jit.script
 def logsubexp(a: Tensor, b: Tensor, log_eps: float) -> Tensor:
-    max_av = torch.maximum(torch.maximum(a, b), torch.full_like(a, log_eps))
-    return max_av + torch.log(torch.exp(a - max_av) - torch.exp(b - max_av))
+    max_ab = torch.clamp_min(torch.maximum(a, b), log_eps)
+    return max_ab + torch.log(torch.exp(a - max_ab) - torch.exp(b - max_ab))
 
 
 @torch.jit.script
@@ -186,7 +186,7 @@ class WkvLogSpace(Function):
         grad_wkv: Tensor,
         grad_state: Tensor,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-        w, u, k, v, state = ctx.saved_tensors
+        w, u, k, v, state = cast(tuple[Tensor, ...], ctx.saved_tensors)
         return wkv_log_space_backward(w, u, k, v, state, grad_wkv, grad_state)
 
 

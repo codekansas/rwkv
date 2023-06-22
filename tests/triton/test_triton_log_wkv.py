@@ -1,10 +1,10 @@
-"""Tests the vanilla WKV Triton kernels."""
+"""Tests the log_space WKV Triton kernels."""
 
 import pytest
 import torch
 from torch import Tensor
 
-from rwkv.wkv.vanilla import initial_state_vanilla, wkv_vanilla_backward, wkv_vanilla_forward
+from rwkv.wkv.log import initial_state_log_space, wkv_log_space_backward, wkv_log_space_forward
 
 
 def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dtype: torch.dtype) -> tuple[Tensor, ...]:
@@ -16,17 +16,17 @@ def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dty
 
 
 @pytest.mark.has_triton()
-def test_triton_vanilla_wkv() -> None:
-    from rwkv.triton.wkv.vanilla import wkv_triton_vanilla_backward, wkv_triton_vanilla_forward
+def test_triton_log_space_wkv() -> None:
+    from rwkv.triton.wkv.log import wkv_triton_log_space_backward, wkv_triton_log_space_forward
 
     bsz, tsz, chans = 2, 7, 16
-    device, dtype = torch.device("cuda"), torch.float32
+    device, dtype = torch.device("cuda"), torch.float64
 
     w, u, k, v = _get_dummy_tensors(bsz, tsz, chans, device, dtype)
-    state = initial_state_vanilla(chans).repeat_interleave(bsz, dim=0).to(device, dtype)
+    state = initial_state_log_space(chans).repeat_interleave(bsz, dim=0).to(device, dtype)
 
-    wkv_ref, state_out_ref = wkv_vanilla_forward(w, u, k, v, state)
-    wkv, state_out = wkv_triton_vanilla_forward(w, u, k, v, state)
+    wkv_ref, state_out_ref = wkv_log_space_forward(w, u, k, v, state)
+    wkv, state_out = wkv_triton_log_space_forward(w, u, k, v, state)
 
     assert torch.allclose(wkv_ref, wkv)
     assert torch.allclose(state_out_ref, state_out)
@@ -35,8 +35,8 @@ def test_triton_vanilla_wkv() -> None:
     grad_state = torch.randn_like(state_out[:, :, -1:])
 
     state_out_ref, state_out = state_out_ref[:, :, :-1], state_out[:, :, :-1]
-    dw_ref, du_ref, dk_ref, dv_ref, dstate_ref = wkv_vanilla_backward(w, u, k, v, state_out_ref, grad_wkv, grad_state)
-    dw, du, dk, dv, dstate = wkv_triton_vanilla_backward(w, u, k, v, state_out, grad_wkv, grad_state)
+    dw_ref, du_ref, dk_ref, dv_ref, dstate_ref = wkv_log_space_backward(w, u, k, v, state_out_ref, grad_wkv, grad_state)
+    dw, du, dk, dv, dstate = wkv_triton_log_space_backward(w, u, k, v, state_out, grad_wkv, grad_state)
 
     for a, b, name in [
         (dw_ref, dw, "dw"),
@@ -49,5 +49,5 @@ def test_triton_vanilla_wkv() -> None:
 
 
 if __name__ == "__main__":
-    # python -m tests.triton.test_triton_vanilla_wkv
-    test_triton_vanilla_wkv()
+    # python -m tests.triton.test_triton_log_space_wkv
+    test_triton_log_space_wkv()
