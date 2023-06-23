@@ -472,7 +472,7 @@ class WKVTritonFunction(Function):
         state: Tensor,
     ) -> tuple[Tensor, Tensor]:
         wkv, state_out = wkv_triton_with_eps_forward(w, u, k, v, state)
-        ctx.save_for_backward(w, u, k, v, state_out[:, :, :-1])
+        ctx.save_for_backward(w, u, k, v, state_out)
         return wkv, state_out[:, :, -1:]
 
     @staticmethod
