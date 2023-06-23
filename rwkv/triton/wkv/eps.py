@@ -9,6 +9,7 @@ import triton
 import triton.language as tl
 from torch import Tensor
 from torch.autograd.function import Function, FunctionCtx, once_differentiable
+
 from rwkv.triton.utils import get_block_size_c
 
 AUTOTUNE_CONFIGS: list[triton.Config] = [
