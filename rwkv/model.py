@@ -117,7 +117,14 @@ class Attention(nn.Module):
     init_x: Tensor
     init_state: Tensor
 
-    def __init__(self, emb_dim: int, lora_rank: int | None = None, wkv_impl: WkvImpl | None = None) -> None:
+    def __init__(
+        self,
+        emb_dim: int,
+        lora_rank: int | None = None,
+        lora_alpha: float = 1.0,
+        lora_dropout: float = 0.0,
+        wkv_impl: WkvImpl | None = None,
+    ) -> None:
         super().__init__()
 
         self.time_decay = nn.Parameter(torch.empty(emb_dim))
@@ -127,10 +134,10 @@ class Attention(nn.Module):
         self.time_mix_v = nn.Parameter(torch.empty(1, 1, emb_dim))
         self.time_mix_r = nn.Parameter(torch.empty(1, 1, emb_dim))
 
-        self.key = maybe_lora(nn.Linear(emb_dim, emb_dim, bias=False), lora_rank)
-        self.value = maybe_lora(nn.Linear(emb_dim, emb_dim, bias=False), lora_rank)
-        self.receptance = maybe_lora(nn.Linear(emb_dim, emb_dim, bias=False), lora_rank)
-        self.output = maybe_lora(nn.Linear(emb_dim, emb_dim, bias=False), lora_rank)
+        self.key = maybe_lora(nn.Linear(emb_dim, emb_dim, bias=False), lora_rank, lora_alpha, lora_dropout)
+        self.value = maybe_lora(nn.Linear(emb_dim, emb_dim, bias=False), lora_rank, lora_alpha, lora_dropout)
+        self.receptance = maybe_lora(nn.Linear(emb_dim, emb_dim, bias=False), lora_rank, lora_alpha, lora_dropout)
+        self.output = maybe_lora(nn.Linear(emb_dim, emb_dim, bias=False), lora_rank, lora_alpha, lora_dropout)
 
         wkv_fn, init_state = get_wkv_fn(emb_dim, wkv_impl)
 
@@ -171,15 +178,22 @@ class Attention(nn.Module):
 class FeedForward(nn.Module):
     init_state: Tensor
 
-    def __init__(self, emb_dim: int, ffn_dim: int, lora_rank: int | None = None) -> None:
+    def __init__(
+        self,
+        emb_dim: int,
+        ffn_dim: int,
+        lora_rank: int | None = None,
+        lora_alpha: float = 1.0,
+        lora_dropout: float = 0.0,
+    ) -> None:
         super().__init__()
 
         self.time_mix_k = nn.Parameter(torch.empty(1, 1, emb_dim))
         self.time_mix_r = nn.Parameter(torch.empty(1, 1, emb_dim))
 
-        self.key = maybe_lora(nn.Linear(emb_dim, ffn_dim, bias=False), lora_rank)
-        self.receptance = maybe_lora(nn.Linear(emb_dim, emb_dim, bias=False), lora_rank)
-        self.value = maybe_lora(nn.Linear(ffn_dim, emb_dim, bias=False), lora_rank)
+        self.key = maybe_lora(nn.Linear(emb_dim, ffn_dim, bias=False), lora_rank, lora_alpha, lora_dropout)
+        self.receptance = maybe_lora(nn.Linear(emb_dim, emb_dim, bias=False), lora_rank, lora_alpha, lora_dropout)
+        self.value = maybe_lora(nn.Linear(ffn_dim, emb_dim, bias=False), lora_rank, lora_alpha, lora_dropout)
 
         self.register_buffer("init_state", torch.zeros(1, 1, emb_dim), persistent=False)
 
@@ -207,6 +221,10 @@ class Block(nn.Module):
         emb_dim: int,
         pre_norm: bool,
         lora_rank: int | None = None,
+        lora_alpha: float = 1.0,
+        lora_dropout: float = 0.0,
+        lora_attn: bool = True,
+        lora_ffn: bool = True,
         wkv_impl: WkvImpl | None = None,
     ) -> None:
         super().__init__()
@@ -215,8 +233,21 @@ class Block(nn.Module):
         self.ln1 = nn.LayerNorm(emb_dim)
         self.ln2 = nn.LayerNorm(emb_dim)
 
-        self.att = Attention(emb_dim, lora_rank=lora_rank, wkv_impl=wkv_impl)
-        self.ffn = FeedForward(emb_dim, emb_dim * 4, lora_rank=lora_rank)
+        self.att = Attention(
+            emb_dim,
+            lora_rank=lora_rank,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+            wkv_impl=wkv_impl,
+        )
+
+        self.ffn = FeedForward(
+            emb_dim,
+            emb_dim * 4,
+            lora_rank=lora_rank,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+        )
 
     def forward(self, x: Tensor, state: State | None = None) -> tuple[Tensor, State]:
         if self.ln0 is not None:
@@ -235,15 +266,49 @@ class Rwkv(nn.Module):
         num_tokens: int,
         num_layers: int,
         lora_rank: int | None = None,
+        lora_alpha: float = 1.0,
+        lora_dropout: float = 0.0,
+        lora_embeddings: bool = True,
+        lora_linear: bool = True,
+        lora_top_k_blocks: int | None = None,
+        lora_attn: bool = True,
+        lora_ffn: bool = True,
         wkv_impl: WkvImpl | None = None,
     ) -> None:
         super().__init__()
 
-        self.emb = maybe_lora(nn.Embedding(num_tokens, emb_dim), lora_rank)
-        blocks = [Block(emb_dim, i == 0, lora_rank=lora_rank, wkv_impl=wkv_impl) for i in range(num_layers)]
+        if lora_top_k_blocks is None:
+            min_block = 0
+        else:
+            min_block = num_layers - lora_top_k_blocks
+
+        self.emb = maybe_lora(
+            nn.Embedding(num_tokens, emb_dim),
+            lora_rank if lora_embeddings else None,
+            lora_alpha,
+            lora_dropout,
+        )
+        blocks = [
+            Block(
+                emb_dim,
+                i == 0,
+                lora_rank=lora_rank if i >= min_block else None,
+                lora_alpha=lora_alpha,
+                lora_dropout=lora_dropout,
+                lora_attn=lora_attn,
+                lora_ffn=lora_ffn,
+                wkv_impl=wkv_impl,
+            )
+            for i in range(num_layers)
+        ]
         self.blocks = nn.ModuleList(blocks)
         self.ln_out = nn.LayerNorm(emb_dim)
-        self.head = maybe_lora(nn.Linear(emb_dim, num_tokens, bias=False), lora_rank)
+        self.head = maybe_lora(
+            nn.Linear(emb_dim, num_tokens, bias=False),
+            lora_rank if lora_linear else None,
+            lora_alpha,
+            lora_dropout,
+        )
 
     def tensor_to(self, x: Tensor) -> Tensor:
         ref_tensor = self.head.weight
@@ -346,14 +411,56 @@ def pretrained_rwkv(
     *,
     device: BaseDevice | None = None,
     lora_rank: int | None = None,
+    lora_alpha: float = 1.0,
+    lora_dropout: float = 0.0,
+    lora_embeddings: bool = True,
+    lora_linear: bool = True,
+    lora_top_k_blocks: int | None = None,
+    lora_attn: bool = True,
+    lora_ffn: bool = True,
     empty: bool = False,
     wkv_impl: WkvImpl | None = None,
 ) -> Rwkv:
+    """Returns a pretrained RWKV model.
+
+    Args:
+        key: The key of the pretrained model to load.
+        device: The device to load the model onto. If None, the model will be
+            loaded onto the device returned by ``AutoDevice.detect_device()``.
+        lora_rank: The rank of the LoRA decomposition to use.
+        lora_alpha: The alpha parameter of the LoRA decomposition.
+        lora_dropout: The dropout rate to use in the LoRA decomposition.
+        lora_embeddings: Whether to use LoRA for the embedding matrices.
+        lora_linear: Whether to use LoRA for the linear layers.
+        lora_top_k_blocks: The number of top-k blocks to use in the LoRA
+            decomposition.
+        lora_attn: Whether to use LoRA for the attention layers.
+        lora_ffn: Whether to use LoRA for the feed-forward layers.
+        empty: Whether to return an empty model with the same structure as the
+            pretrained model.
+        wkv_impl: The implementation of the WKV to use.
+
+    Returns:
+        The pretrained RWKV model.
+    """
     device = AutoDevice.detect_device() if device is None else device
     model_args = PRETRAINED_MODEL_SIZES[key]
 
     with Timer("building model skeleton", spinner=True), init_empty_weights():
-        model = Rwkv(model_args.emb_dim, 50277, model_args.num_layers, lora_rank=lora_rank, wkv_impl=wkv_impl)
+        model = Rwkv(
+            emb_dim=model_args.emb_dim,
+            num_tokens=50277,
+            num_layers=model_args.num_layers,
+            lora_rank=lora_rank,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+            lora_embeddings=lora_embeddings,
+            lora_linear=lora_linear,
+            lora_top_k_blocks=lora_top_k_blocks,
+            lora_attn=lora_attn,
+            lora_ffn=lora_ffn,
+            wkv_impl=wkv_impl,
+        )
 
     if empty:
         model._apply(meta_to_empty_func(device.get_device(), torch.half))
