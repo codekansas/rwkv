@@ -235,7 +235,7 @@ class Block(nn.Module):
 
         self.att = Attention(
             emb_dim,
-            lora_rank=lora_rank,
+            lora_rank=lora_rank if lora_attn else None,
             lora_alpha=lora_alpha,
             lora_dropout=lora_dropout,
             wkv_impl=wkv_impl,
@@ -244,7 +244,7 @@ class Block(nn.Module):
         self.ffn = FeedForward(
             emb_dim,
             emb_dim * 4,
-            lora_rank=lora_rank,
+            lora_rank=lora_rank if lora_ffn else None,
             lora_alpha=lora_alpha,
             lora_dropout=lora_dropout,
         )
