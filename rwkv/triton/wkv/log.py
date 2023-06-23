@@ -13,6 +13,12 @@ from torch.autograd.function import Function, FunctionCtx, once_differentiable
 
 from rwkv.wkv.log import EPS
 
+AUTOTUNE_CONFIGS: list[triton.Config] = [
+    triton.Config({"BLOCK_SIZE_C": 32}, num_warps=2),
+    triton.Config({"BLOCK_SIZE_C": 128}, num_warps=4),
+    triton.Config({"BLOCK_SIZE_C": 1024}, num_warps=8),
+]
+
 
 @triton.jit
 def logaddexp(a, b):
@@ -26,6 +32,7 @@ def logsubexp(a, b, log_eps: tl.constexpr):
     return max_ab + tl.log(tl.exp(a - max_ab) - tl.exp(b - max_ab))
 
 
+@triton.autotune(configs=AUTOTUNE_CONFIGS, key=["chans"])
 @triton.jit
 def wkv_triton_log_space_forward_kernel(
     # W
@@ -192,7 +199,6 @@ def wkv_triton_log_space_forward(
         eps=eps,
         log_eps=math.log(eps),
         normalize=normalize,
-        BLOCK_SIZE_C=block_size_c,
     )
 
     state_out = torch.cat((state, state_out), dim=2)
@@ -200,6 +206,7 @@ def wkv_triton_log_space_forward(
     return wkvs, state_out
 
 
+@triton.autotune(configs=AUTOTUNE_CONFIGS, key=["chans"])
 @triton.jit
 def wkv_log_space_triton_backward_kernel(
     # W
@@ -409,9 +416,6 @@ def wkv_triton_log_space_backward(
     gv = torch.empty_like(v)
     gstate = k.new_empty(bsz, 3, 1, chans)
 
-    # Constants.
-    block_size_c = 32
-
     def grid(meta: dict[str, Any]) -> tuple[int, ...]:
         return (bsz, triton.cdiv(chans, meta["BLOCK_SIZE_C"]))
 
@@ -473,7 +477,6 @@ def wkv_triton_log_space_backward(
         tsz,
         chans,
         eps=eps,
-        BLOCK_SIZE_C=block_size_c,
     )
 
     return gw, gu, gk, gv, gstate
