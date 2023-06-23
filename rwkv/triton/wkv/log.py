@@ -3,7 +3,7 @@
 """Defines Triton kernels for the log-space RWKV forward and backward passes."""
 
 import math
-from typing import cast
+from typing import Any, cast
 
 import torch
 import triton
@@ -11,7 +11,14 @@ import triton.language as tl
 from torch import Tensor
 from torch.autograd.function import Function, FunctionCtx, once_differentiable
 
+from rwkv.triton.utils import get_block_size_c
 from rwkv.wkv.log import EPS
+
+AUTOTUNE_CONFIGS: list[triton.Config] = [
+    triton.Config({"BLOCK_SIZE_C": 32}, num_warps=2),
+    triton.Config({"BLOCK_SIZE_C": 128}, num_warps=4),
+    triton.Config({"BLOCK_SIZE_C": 1024}, num_warps=8),
+]
 
 
 @triton.jit
@@ -26,6 +33,7 @@ def logsubexp(a, b, log_eps: tl.constexpr):
     return max_ab + tl.log(tl.exp(a - max_ab) - tl.exp(b - max_ab))
 
 
+# @triton.autotune(configs=AUTOTUNE_CONFIGS, key=["chans"])
 @triton.jit
 def wkv_triton_log_space_forward_kernel(
     # W
@@ -70,8 +78,9 @@ def wkv_triton_log_space_forward_kernel(
 ):
     # Parallelize over the batch dimension.
     b_idx = tl.program_id(0)
+    c_idx = tl.program_id(1)
 
-    cs = tl.arange(0, BLOCK_SIZE_C)
+    cs = (c_idx * BLOCK_SIZE_C) + tl.arange(0, BLOCK_SIZE_C)
     cmask = cs < chans
 
     # Pointers to the batch (and possibly channel) for the input tensors.
@@ -130,7 +139,7 @@ def wkv_triton_log_space_forward(
     eps: float = EPS,
     normalize: bool = False,
 ) -> tuple[Tensor, Tensor]:
-    (bsz, tsz, chans), device, dtype = k.shape, k.device, k.dtype
+    (bsz, tsz, chans), device = k.shape, k.device
 
     # Checks tensor shapes.
     assert v.shape == (bsz, tsz, chans), f"{v.shape} != {(bsz, tsz, chans)}"
@@ -138,18 +147,21 @@ def wkv_triton_log_space_forward(
     assert w.shape == (chans,), f"{w.shape} != {(chans,)}"
     assert u.shape == (chans,), f"{u.shape} != {(chans,)}"
 
-    # Checks tensor dtypes and devices.
+    # Checks tensor devices.
     for t in (v, state, w, u):
-        assert t.dtype == dtype and t.device == device, f"{t.dtype} != {dtype} or {t.device} != {device}"
+        assert t.device == device, f"{t.device} != {device}"
 
     # New tensors to output.
     wkvs = k.new_empty(bsz, tsz, chans)
     state_out = k.new_empty(bsz, 3, tsz, chans)
 
     # Constants.
-    block_size_c = max(triton.next_power_of_2(chans), 32)
+    block_size_c = get_block_size_c(chans)
 
-    wkv_triton_log_space_forward_kernel[(bsz,)](
+    def grid(meta: dict[str, Any]) -> tuple[int, ...]:
+        return (bsz, triton.cdiv(chans, meta["BLOCK_SIZE_C"]))
+
+    wkv_triton_log_space_forward_kernel[grid](
         # W
         w,
         w.stride(0),
@@ -196,8 +208,9 @@ def wkv_triton_log_space_forward(
     return wkvs, state_out
 
 
+# @triton.autotune(configs=AUTOTUNE_CONFIGS, key=["chans"])
 @triton.jit
-def wkv_log_space_triton_backward_kernel(
+def wkv_triton_log_space_backward_kernel(
     # W
     w_ptr,
     w_s_c,
@@ -259,8 +272,9 @@ def wkv_log_space_triton_backward_kernel(
 ):
     # Parallelize over the batch dimension.
     b_idx = tl.program_id(0)
+    c_idx = tl.program_id(1)
 
-    cs = tl.arange(0, BLOCK_SIZE_C)
+    cs = (c_idx * BLOCK_SIZE_C) + tl.arange(0, BLOCK_SIZE_C)
     cmask = cs < chans
 
     # Pointers to the batch (and possibly channel) for the input tensors.
@@ -383,7 +397,7 @@ def wkv_triton_log_space_backward(
     grad_state: Tensor,
     eps: float = EPS,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-    (bsz, tsz, chans), device, dtype = k.shape, k.device, k.dtype
+    (bsz, tsz, chans), device = k.shape, k.device
 
     # Checks tensor shapes.
     assert v.shape == (bsz, tsz, chans), f"{v.shape} != {(bsz, tsz, chans)}"
@@ -393,9 +407,9 @@ def wkv_triton_log_space_backward(
     assert grad_wkv.shape == (bsz, tsz, chans)
     assert grad_state.shape == (bsz, 3, 1, chans)
 
-    # Checks tensor dtypes and devices.
+    # Checks tensor devices.
     for t in (v, state, w, u, grad_wkv, grad_state):
-        assert t.dtype == dtype and t.device == device, f"{t.dtype} != {dtype} or {t.device} != {device}"
+        assert t.device == device, f"{t.device} != {device}"
 
     # New tensors to output.
     gw = torch.zeros_like(w)
@@ -405,9 +419,12 @@ def wkv_triton_log_space_backward(
     gstate = k.new_empty(bsz, 3, 1, chans)
 
     # Constants.
-    block_size_c = max(triton.next_power_of_2(chans), 32)
+    block_size_c = get_block_size_c(chans)
 
-    wkv_log_space_triton_backward_kernel[(bsz,)](
+    def grid(meta: dict[str, Any]) -> tuple[int, ...]:
+        return (bsz, triton.cdiv(chans, meta["BLOCK_SIZE_C"]))
+
+    wkv_triton_log_space_backward_kernel[grid](
         # W
         w,
         w.stride(0),
@@ -513,3 +530,11 @@ def wkv_triton_log_space(
     normalize: bool = False,
 ) -> tuple[Tensor, Tensor]:
     return WKVTritonFunction.apply(w, u, k, v, state, eps, normalize)
+
+
+def run_benchmark() -> None:
+    pass
+
+
+if __name__ == "__main__":
+    run_benchmark()

@@ -32,7 +32,7 @@ def get_default_impl() -> WkvImpl:
         return cast(WkvImpl, wkv_impl)
 
     warnings.warn("WKV_IMPL environment variable not set; using default")
-    return "log"
+    return "eps"
 
 
 def get_wkv_fn(emb_dim: int, impl: WkvImpl | None = None, use_triton: bool = True) -> tuple[WkvFn, WkvInitState]:
