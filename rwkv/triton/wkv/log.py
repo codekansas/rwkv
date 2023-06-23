@@ -512,12 +512,12 @@ class WKVTritonFunction(Function):
         ctx: FunctionCtx,
         gwkv: Tensor,
         gstate: Tensor,
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, None]:
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, None, None]:
         if ctx.normalize:
             raise NotImplementedError("Backward pass for normalized operation is incorrect")
         w, u, k, v, state = cast(tuple[Tensor, ...], ctx.saved_tensors)
         gw, gu, gk, gv, gstate = wkv_triton_log_space_backward(w, u, k, v, state, gwkv, gstate, ctx.eps)
-        return gw, gu, gk, gv, gstate, None
+        return gw, gu, gk, gv, gstate, None, None
 
 
 def wkv_triton_log_space(
