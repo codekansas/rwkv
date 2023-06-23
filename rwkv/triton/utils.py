@@ -30,3 +30,11 @@ def largest_div_power_of_2(n: int, init_k: int = 32) -> int:
     while k * 2 <= n:
         k *= 2
     return k
+
+
+def get_block_size_c(chans: int) -> int:
+    if chans < 32:
+        return 32
+    if chans < 64:
+        return 64
+    return 128

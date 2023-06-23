@@ -11,6 +11,7 @@ import triton.language as tl
 from torch import Tensor
 from torch.autograd.function import Function, FunctionCtx, once_differentiable
 
+from rwkv.triton.utils import get_block_size_c
 from rwkv.wkv.log import EPS
 
 AUTOTUNE_CONFIGS: list[triton.Config] = [
@@ -32,7 +33,7 @@ def logsubexp(a, b, log_eps: tl.constexpr):
     return max_ab + tl.log(tl.exp(a - max_ab) - tl.exp(b - max_ab))
 
 
-@triton.autotune(configs=AUTOTUNE_CONFIGS, key=["chans"])
+# @triton.autotune(configs=AUTOTUNE_CONFIGS, key=["chans"])
 @triton.jit
 def wkv_triton_log_space_forward_kernel(
     # W
@@ -155,7 +156,7 @@ def wkv_triton_log_space_forward(
     state_out = k.new_empty(bsz, 3, tsz, chans)
 
     # Constants.
-    block_size_c = 32
+    block_size_c = get_block_size_c(chans)
 
     def grid(meta: dict[str, Any]) -> tuple[int, ...]:
         return (bsz, triton.cdiv(chans, meta["BLOCK_SIZE_C"]))
@@ -199,6 +200,7 @@ def wkv_triton_log_space_forward(
         eps=eps,
         log_eps=math.log(eps),
         normalize=normalize,
+        BLOCK_SIZE_C=block_size_c,
     )
 
     state_out = torch.cat((state, state_out), dim=2)
@@ -206,9 +208,9 @@ def wkv_triton_log_space_forward(
     return wkvs, state_out
 
 
-@triton.autotune(configs=AUTOTUNE_CONFIGS, key=["chans"])
+# @triton.autotune(configs=AUTOTUNE_CONFIGS, key=["chans"])
 @triton.jit
-def wkv_log_space_triton_backward_kernel(
+def wkv_triton_log_space_backward_kernel(
     # W
     w_ptr,
     w_s_c,
@@ -416,10 +418,13 @@ def wkv_triton_log_space_backward(
     gv = torch.empty_like(v)
     gstate = k.new_empty(bsz, 3, 1, chans)
 
+    # Constants.
+    block_size_c = get_block_size_c(chans)
+
     def grid(meta: dict[str, Any]) -> tuple[int, ...]:
         return (bsz, triton.cdiv(chans, meta["BLOCK_SIZE_C"]))
 
-    wkv_log_space_triton_backward_kernel[grid](
+    wkv_triton_log_space_backward_kernel[grid](
         # W
         w,
         w.stride(0),
@@ -477,6 +482,7 @@ def wkv_triton_log_space_backward(
         tsz,
         chans,
         eps=eps,
+        BLOCK_SIZE_C=block_size_c,
     )
 
     return gw, gu, gk, gv, gstate
