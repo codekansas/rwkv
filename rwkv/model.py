@@ -513,6 +513,9 @@ def pretrained_rwkv(
             lora_attn=lora_attn,
             lora_ffn=lora_ffn,
             freeze_non_lora=freeze_non_lora,
+            freeze_layer_norm=freeze_layer_norm,
+            freeze_attn=freeze_attn,
+            freeze_ffn=freeze_ffn,
             wkv_impl=wkv_impl,
         )
 
