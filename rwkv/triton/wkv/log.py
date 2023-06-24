@@ -488,7 +488,7 @@ def wkv_triton_log_space_backward(
     return gw, gu, gk, gv, gstate
 
 
-class WKVTritonFunction(Function):
+class WKVLogSpaceTritonFunction(Function):
     @staticmethod
     def forward(
         ctx: FunctionCtx,
@@ -529,12 +529,4 @@ def wkv_triton_log_space(
     eps: float = EPS,
     normalize: bool = False,
 ) -> tuple[Tensor, Tensor]:
-    return WKVTritonFunction.apply(w, u, k, v, state, eps, normalize)
-
-
-def run_benchmark() -> None:
-    pass
-
-
-if __name__ == "__main__":
-    run_benchmark()
+    return WKVLogSpaceTritonFunction.apply(w, u, k, v, state, eps, normalize)
