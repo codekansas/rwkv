@@ -461,7 +461,7 @@ def wkv_triton_with_eps_backward(
     return gw, gu, gk, gv, gstate
 
 
-class WKVTritonFunction(Function):
+class WKVWithEpsTritonFunction(Function):
     @staticmethod
     def forward(
         ctx: FunctionCtx,
@@ -484,4 +484,4 @@ class WKVTritonFunction(Function):
 
 
 def wkv_triton_with_eps(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tensor) -> tuple[Tensor, Tensor]:
-    return WKVTritonFunction.apply(w, u, k, v, state)
+    return WKVWithEpsTritonFunction.apply(w, u, k, v, state)
