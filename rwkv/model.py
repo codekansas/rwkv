@@ -463,7 +463,7 @@ def pretrained_rwkv(
         )
 
     if empty:
-        model._apply(meta_to_empty_func(device.get_device(), torch.half))
+        model._apply(meta_to_empty_func(device.get_device(), torch.bfloat16))
         model._apply(lambda x: device.tensor_to(x))
         return model
 
@@ -475,7 +475,7 @@ def pretrained_rwkv(
 
     # Build the transformer and loads the checkpoint.
     with Timer("loading state dict", spinner=True):
-        model._apply(meta_to_empty_func(device.get_device(), torch.half))
+        model._apply(meta_to_empty_func(device.get_device(), torch.bfloat16))
         model.load_state_dict(ckpt)
         model._apply(lambda x: device.tensor_to(x))
 
