@@ -10,7 +10,7 @@ from rwkv.wkv.log import initial_state_log_space, wkv_log_space, wkv_log_space_f
 
 
 def _get_dummy_tensors(bsz: int, tsz: int, chans: int, device: torch.device, dtype: torch.dtype) -> tuple[Tensor, ...]:
-    w = -torch.exp(torch.rand(chans, dtype=dtype, device=device))
+    w = torch.exp(torch.rand(chans, dtype=dtype, device=device))
     u = torch.rand(chans, dtype=dtype, device=device)
     k = torch.randn(bsz, tsz, chans, dtype=dtype, device=device)
     v = torch.randn(bsz, tsz, chans, dtype=dtype, device=device)
