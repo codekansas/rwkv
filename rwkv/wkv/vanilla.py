@@ -20,7 +20,7 @@ def wkv_vanilla_forward(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tenso
 
     alpha, beta = state[:, :, -1].chunk(2, dim=1)  # (B, 1, D), (B, 1, D)
 
-    ew = torch.exp(w)
+    ew = torch.exp(-w)
 
     wkvs = []
     alphas = [alpha]
@@ -66,7 +66,7 @@ def wkv_vanilla_backward(
     alpha, beta = state.chunk(2, dim=1)  # (B, 1, T + 1, D), (B, 1, T + 1, D)
     grad_alpha, grad_beta = grad_state[:, :, 0].chunk(2, dim=1)  # (B, 1, D), (B, 1, D)
 
-    ew = torch.exp(w)
+    ew = torch.exp(-w)
 
     grad_w = torch.zeros_like(w)
     grad_u = torch.zeros_like(u)
@@ -106,7 +106,7 @@ def wkv_vanilla_backward(
         grad_alpha = grad_alpha * ew + grad_alpha_wkv
         grad_beta = grad_beta * ew + grad_beta_wkv
 
-    return grad_w, grad_u, grad_k, grad_v, torch.stack((grad_alpha, grad_beta), dim=1)
+    return -grad_w, grad_u, grad_k, grad_v, torch.stack((grad_alpha, grad_beta), dim=1)
 
 
 class WkvVanilla(Function):

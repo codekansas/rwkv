@@ -176,7 +176,7 @@ class Attention(nn.Module):
         sr = torch.sigmoid(r)
 
         w, u = self.time_decay, self.time_first
-        w = -torch.exp(w)
+        w = torch.exp(w)
         wkv, next_state = self.wkv_fn(w, u, k, v, last_state)
         rwkv = wkv * sr
 
@@ -520,8 +520,8 @@ def pretrained_rwkv(
         )
 
     if empty:
-        model._apply(meta_to_empty_func(device.get_device(), torch.bfloat16))
-        model._apply(lambda x: device.tensor_to(x))
+        model._apply(meta_to_empty_func(torch.device("cpu"), torch.bfloat16))
+        device.module_to(model)
         return model
 
     with Timer("downloading checkpoint"):
@@ -532,8 +532,8 @@ def pretrained_rwkv(
 
     # Build the transformer and loads the checkpoint.
     with Timer("loading state dict", spinner=True):
-        model._apply(meta_to_empty_func(device.get_device(), torch.bfloat16))
+        model._apply(meta_to_empty_func(torch.device("cpu"), torch.bfloat16))
         model.load_state_dict(ckpt)
-        model._apply(lambda x: device.tensor_to(x))
+        device.module_to(model)
 
     return model

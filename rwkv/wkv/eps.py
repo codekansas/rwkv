@@ -37,7 +37,7 @@ def wkv_with_eps_forward(w: Tensor, u: Tensor, k: Tensor, v: Tensor, state: Tens
         wkv = (e1 * alpha + e2 * vt) / (e1 * beta + e2)
         wkvs.append(wkv)
 
-        w_eps = w + eps
+        w_eps = -w + eps
         eps = torch.maximum(w_eps, kt)
         e1 = torch.exp(w_eps - eps)
         e2 = torch.exp(kt - eps)
@@ -108,7 +108,7 @@ def wkv_with_eps_backward(
         grad_beta_wkv = -grad_wkvt * e1 * (e2 * vt + e1 * alpha_prev) / denom_sq
         grad_eps_wkv = grad_wkvt * euke * (alpha_prev - vt * beta_prev) / (e1 * beta_prev + e2) ** 2
 
-        e1 = torch.exp(w + eps_prev - eps_curr)
+        e1 = torch.exp(-w + eps_prev - eps_curr)
         e2 = torch.exp(kt - eps_curr)
 
         # Backpropagates alpha gradients.
@@ -125,7 +125,7 @@ def wkv_with_eps_backward(
         grad_eps += grad_beta * -beta_curr
 
         # Backpropagates epsilon gradients.
-        eps_grad_mask = w + eps_prev > kt
+        eps_grad_mask = -w + eps_prev > kt
         grad_eps_we = torch.where(eps_grad_mask, grad_eps, torch.zeros_like(grad_eps))
         grad_w += grad_eps_we.flatten(0, -2).sum(0)
         grad_k[:, t : t + 1] += torch.where(eps_grad_mask, torch.zeros_like(grad_eps), grad_eps)
@@ -135,7 +135,7 @@ def wkv_with_eps_backward(
         grad_beta = grad_beta * e1 + grad_beta_wkv
         grad_eps = grad_alpha_we + grad_beta_we + grad_eps_we + grad_eps_wkv
 
-    return grad_w, grad_u, grad_k, grad_v, torch.stack((grad_alpha, grad_beta, grad_eps), dim=1)
+    return -grad_w, grad_u, grad_k, grad_v, torch.stack((grad_alpha, grad_beta, grad_eps), dim=1)
 
 
 class WkvWithEps(Function):
